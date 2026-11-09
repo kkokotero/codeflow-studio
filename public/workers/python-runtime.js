@@ -38,18 +38,18 @@ function exitFunction() {
 }
 
 const instrumentation = `
-import ast as __cf_ast
+import ast as cf_ast
 import builtins as __cf_builtins
 import json as __cf_json
 
-__cf_safe_modules = {
+cf_safe_modules = {
     "math", "json", "statistics", "random", "collections", "itertools",
     "functools", "operator", "string", "re", "datetime", "decimal",
     "fractions", "heapq", "bisect"
 }
 __cf_real_import = __cf_builtins.__import__
 def __cf_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name.split(".")[0] not in __cf_safe_modules:
+    if name.split(".")[0] not in cf_safe_modules:
         raise ImportError("El módulo '" + name + "' no está habilitado en el runtime aislado.")
     return __cf_real_import(name, globals, locals, fromlist, level)
 
@@ -91,11 +91,11 @@ def __cf_print(*values, sep=" ", end="\\n", **kwargs):
     __cf_emit_output__(sep.join(str(value) for value in values) + end)
 
 def __cf_name(node):
-    if isinstance(node, (__cf_ast.FunctionDef, __cf_ast.AsyncFunctionDef)):
+    if isinstance(node, (cf_ast.FunctionDef, cf_ast.AsyncFunctionDef)):
         return node.name
     return None
 
-class __CodeFlowInstrumenter(__cf_ast.NodeTransformer):
+class CodeFlowInstrumenter(cf_ast.NodeTransformer):
     def __cf_body(self, body):
         output = []
         for statement in body:
@@ -105,14 +105,14 @@ class __CodeFlowInstrumenter(__cf_ast.NodeTransformer):
             if isinstance(transformed, list):
                 output.extend(transformed)
                 continue
-            if isinstance(statement, (__cf_ast.FunctionDef, __cf_ast.AsyncFunctionDef, __cf_ast.ClassDef)):
+            if isinstance(statement, (cf_ast.FunctionDef, cf_ast.AsyncFunctionDef, cf_ast.ClassDef)):
                 output.append(transformed)
                 continue
             line = getattr(statement, "lineno", 1)
-            trace = __cf_ast.Expr(value=__cf_ast.Call(func=__cf_ast.Name(id="__cf_trace", ctx=__cf_ast.Load()), args=[__cf_ast.Constant(value=line), __cf_ast.Call(func=__cf_ast.Name(id="locals", ctx=__cf_ast.Load()), args=[], keywords=[])], keywords=[]))
-            if isinstance(transformed, __cf_ast.Return) and transformed.value is not None:
-                transformed.value = __cf_ast.Call(func=__cf_ast.Name(id="__cf_capture_return", ctx=__cf_ast.Load()), args=[__cf_ast.Constant(value=line), transformed.value, __cf_ast.Call(func=__cf_ast.Name(id="locals", ctx=__cf_ast.Load()), args=[], keywords=[])], keywords=[])
-            if isinstance(statement, (__cf_ast.Return, __cf_ast.Raise, __cf_ast.Break, __cf_ast.Continue)):
+            trace = cf_ast.Expr(value=cf_ast.Call(func=cf_ast.Name(id="__cf_trace", ctx=cf_ast.Load()), args=[cf_ast.Constant(value=line), cf_ast.Call(func=cf_ast.Name(id="locals", ctx=cf_ast.Load()), args=[], keywords=[])], keywords=[]))
+            if isinstance(transformed, cf_ast.Return) and transformed.value is not None:
+                transformed.value = cf_ast.Call(func=cf_ast.Name(id="__cf_capture_return", ctx=cf_ast.Load()), args=[cf_ast.Constant(value=line), transformed.value, cf_ast.Call(func=cf_ast.Name(id="locals", ctx=cf_ast.Load()), args=[], keywords=[])], keywords=[])
+            if isinstance(statement, (cf_ast.Return, cf_ast.Raise, cf_ast.Break, cf_ast.Continue)):
                 output.extend([trace, transformed])
             else:
                 output.extend([transformed, trace])
@@ -126,9 +126,9 @@ class __CodeFlowInstrumenter(__cf_ast.NodeTransformer):
         node.decorator_list = [self.visit(item) for item in node.decorator_list]
         node.args = self.visit(node.args)
         node.body = self.__cf_body(node.body)
-        enter = __cf_ast.Expr(value=__cf_ast.Call(func=__cf_ast.Name(id="__cf_enter", ctx=__cf_ast.Load()), args=[__cf_ast.Constant(value=node.name)], keywords=[]))
-        leave = __cf_ast.Expr(value=__cf_ast.Call(func=__cf_ast.Name(id="__cf_exit", ctx=__cf_ast.Load()), args=[], keywords=[]))
-        wrapped = __cf_ast.Try(body=[enter, *node.body], handlers=[], orelse=[], finalbody=[leave])
+        enter = cf_ast.Expr(value=cf_ast.Call(func=cf_ast.Name(id="__cf_enter", ctx=cf_ast.Load()), args=[cf_ast.Constant(value=node.name)], keywords=[]))
+        leave = cf_ast.Expr(value=cf_ast.Call(func=cf_ast.Name(id="__cf_exit", ctx=cf_ast.Load()), args=[], keywords=[]))
+        wrapped = cf_ast.Try(body=[enter, *node.body], handlers=[], orelse=[], finalbody=[leave])
         node.body = [wrapped]
         return node
 
@@ -192,17 +192,17 @@ class __CodeFlowInstrumenter(__cf_ast.NodeTransformer):
 
     def visit_Import(self, node):
         for alias in node.names:
-            if alias.name.split(".")[0] not in __cf_safe_modules:
+            if alias.name.split(".")[0] not in cf_safe_modules:
                 raise ImportError("El módulo '" + alias.name + "' no está habilitado en el runtime aislado.")
         return node
 
     def visit_ImportFrom(self, node):
-        if node.module and node.module.split(".")[0] not in __cf_safe_modules:
+        if node.module and node.module.split(".")[0] not in cf_safe_modules:
             raise ImportError("El módulo '" + node.module + "' no está habilitado en el runtime aislado.")
         return node
 
     def visit_Call(self, node):
-        if isinstance(node.func, __cf_ast.Name) and node.func.id in {"eval", "exec", "compile", "__import__"}:
+        if isinstance(node.func, cf_ast.Name) and node.func.id in {"eval", "exec", "compile", "__import__"}:
             raise RuntimeError("La ejecución dinámica de código está deshabilitada en el runtime aislado.")
         return self.generic_visit(node)
 `
@@ -236,9 +236,9 @@ self.onmessage = async (event) => {
     runtime.globals.set('__source_text', code)
     post({ type: 'ready' })
     const runner = `
-__cf_tree = __cf_ast.parse(__source_text, filename="<CodeFlow>", mode="exec")
-__cf_tree = __CodeFlowInstrumenter().visit(__cf_tree)
-__cf_ast.fix_missing_locations(__cf_tree)
+__cf_tree = cf_ast.parse(__source_text, filename="<CodeFlow>", mode="exec")
+__cf_tree = CodeFlowInstrumenter().visit(__cf_tree)
+cf_ast.fix_missing_locations(__cf_tree)
 __cf_namespace = {"__name__": "__main__", "__builtins__": __cf_builtins_map, "__cf_trace": __cf_trace, "__cf_capture_return": __cf_capture_return, "__cf_enter": __cf_enter__, "__cf_exit": __cf_exit__, "__cf_emit_step__": __cf_emit_step__, "__cf_emit_output__": __cf_emit_output__, "__cf_math": __cf_math, "__cf_json": __cf_json}
 __cf_namespace["print"] = __cf_print
 exec(compile(__cf_tree, "<CodeFlow>", "exec"), __cf_namespace)

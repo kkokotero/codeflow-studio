@@ -161,7 +161,10 @@ scope.onmessage = async (event: MessageEvent<{ code: string }>) => {
     scope.WebSocket = undefined as unknown as typeof WebSocket
     const consoleProxy = safeConsole()
     send({ type: 'ready' })
-    const sandbox = new Function(traceName, enterName, exitName, returnName, 'console', 'fetch', 'importScripts', 'WebSocket', 'globalThis', 'self', 'Function', 'eval', 'postMessage', 'XMLHttpRequest', 'EventSource', 'WebTransport', `"use strict";\n${executable}`)
+    const sandbox = new Function(
+      traceName, enterName, exitName, returnName, 'console', 'fetch', 'importScripts', 'WebSocket', 'globalThis', 'self', 'Function', 'eval', 'postMessage', 'XMLHttpRequest', 'EventSource', 'WebTransport',
+      `return (function () {\n"use strict";\n${executable}\n}).call(Object.freeze(Object.create(null)));`,
+    )
     await Promise.resolve(sandbox(trace, enter, exit, captureReturn, consoleProxy, deny, deny, undefined, Object.freeze({}), Object.freeze({}), deny, deny, deny, undefined, undefined, undefined))
     send({ type: 'done' })
   } catch (error) {

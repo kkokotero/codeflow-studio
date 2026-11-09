@@ -9,6 +9,7 @@ import {
   addEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
 } from '@xyflow/react'
@@ -17,6 +18,15 @@ import { FlowNode } from '@/components/codeflow/flow-node'
 import type { DiagramGraph, FlowCardData, FlowCardEdge } from '@/lib/codeflow-types'
 
 const nodeTypes = { flowCard: FlowNode }
+
+function AutoFit({ nodeKey }: { nodeKey: string }) {
+  const { fitView } = useReactFlow()
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => fitView({ padding: 0.22, maxZoom: 1.1 }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [fitView, nodeKey])
+  return null
+}
 
 interface FlowCanvasProps {
   graph: DiagramGraph
@@ -88,11 +98,11 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
           maxZoom={1.6}
           nodesConnectable
           nodesDraggable
-          proOptions={{ hideAttribution: true }}
         >
+          <AutoFit nodeKey={graph.nodes.map((node) => node.id).join(',')} />
           <Background color="#26302d" gap={20} size={1} />
           <Controls position="bottom-left" showInteractive={false} />
-          <MiniMap position="bottom-right" nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, #72807b)`} maskColor="rgba(7, 10, 13, 0.72)" />
+          <MiniMap position="top-right" style={{ width: 118, height: 82 }} nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, #72807b)`} maskColor="rgba(7, 10, 13, 0.72)" />
         </ReactFlow>
       )}
     </div>

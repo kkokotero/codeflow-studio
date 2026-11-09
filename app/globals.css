@@ -203,13 +203,15 @@
 .react-flow__handle { width: 6px !important; height: 6px !important; border: 1px solid #89978d !important; background: #29342e !important; }
 .react-flow__edge-path { stroke-width: 1.25; }
 .react-flow__edge-text { fill: #96a49a !important; }
-.react-flow__attribution { display: none; }
+.react-flow__attribution { padding: 2px 4px !important; border: 1px solid #2b3430; border-radius: 4px 0 0 0; color: #829087 !important; background: #111815d9 !important; font-size: 8px !important; }
 .flow-node { position: relative; width: 178px; min-height: 78px; padding: 9px 10px 8px; border: 1px solid #3a4640; border-radius: 8px; background: linear-gradient(145deg, #1c2422, #141a1b); box-shadow: 0 6px 18px #0004; transition: border-color 130ms ease, box-shadow 130ms ease, transform 130ms ease; }
 .flow-node:hover { border-color: #62756a; box-shadow: 0 7px 22px #0006; }
 .flow-node.is-active { border-color: #bdff82; box-shadow: 0 0 0 1px #bdff8235, 0 0 20px #a9ff7a17; }
 .flow-node.is-selected { border-color: #cad8ce; }
 .flow-node--function { --node-accent: #94cba7; }
 .flow-node--variable { --node-accent: #81b9d9; }
+.flow-node--object { --node-accent: #82b7d0; }
+.flow-node--event { --node-accent: #e19abf; }
 .flow-node--condition { --node-accent: #e1bd73; }
 .flow-node--loop { --node-accent: #b29be3; }
 .flow-node--class { --node-accent: #d78fbd; }
@@ -231,6 +233,7 @@
 .legend-swatch { width: 6px; height: 6px; border-radius: 2px; background: #93cba7; }
 .legend-swatch--condition { background: #ddb66c; }
 .legend-swatch--variable { background: #7db5d7; }
+.legend-swatch--event { background: #e19abf; }
 .diagram-footer__hint { margin-left: auto; color: #59665f; }
 
 .inspector-pane { border-right: 0; background: #111617; }
@@ -430,9 +433,6 @@
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
-.flow-node--object { --node-accent: #82b7d0; }
-.flow-node--event { --node-accent: #e19abf; }
-.legend-swatch--event { background: #e19abf; }
 .history-mode-tag { color: #f0c67e; border: 1px solid #59482c; border-radius: 4px; padding: 2px 5px; font-size: 8px; letter-spacing: .04em; }
 .return-value-card, .memory-estimate { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 10px; border: 1px solid #35443a; border-radius: 7px; background: #151e19; }
 .return-value-card > span { color: #a6c98c; font-size: 8px; letter-spacing: .1em; }
