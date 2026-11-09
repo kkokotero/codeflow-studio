@@ -1,0 +1,100 @@
+'use client'
+
+import { memo, useCallback, useEffect, useMemo } from 'react'
+import {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import { FlowNode } from '@/components/codeflow/flow-node'
+import type { DiagramGraph, FlowCardData, FlowCardEdge } from '@/lib/codeflow-types'
+
+const nodeTypes = { flowCard: FlowNode }
+
+interface FlowCanvasProps {
+  graph: DiagramGraph
+  activeLine: number | null
+  onSelectNode: (nodeId: string) => void
+  manualEdges: FlowCardEdge[]
+  onManualEdgesChange: (edges: FlowCardEdge[]) => void
+  onConnectNodes: (edgeCount: number) => void
+}
+
+export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeLine, onSelectNode, onManualEdgesChange, onConnectNodes }: FlowCanvasProps) {
+  const activeNodes = useMemo(() => graph.nodes.map((node) => ({ ...node, data: { ...node.data, active: node.data.line === activeLine } })), [activeLine, graph.nodes])
+  const [nodes, setNodes, onNodesChange] = useNodesState(activeNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState([...graph.edges, ...manualEdges])
+
+  useEffect(() => {
+    setNodes((current) => activeNodes.map((next) => {
+      const existing = current.find((node) => node.id === next.id)
+      return existing ? { ...next, position: existing.position, selected: existing.selected } : next
+    }))
+  }, [activeNodes, setNodes])
+
+  useEffect(() => {
+    const validNodeIds = new Set(graph.nodes.map((node) => node.id))
+    setEdges((current) => {
+      const existingManual = current.filter((edge) => edge.id.startsWith('edge-user-') && validNodeIds.has(edge.source) && validNodeIds.has(edge.target))
+      const manual = manualEdges.length ? manualEdges.filter((edge) => validNodeIds.has(edge.source) && validNodeIds.has(edge.target)) : existingManual
+      const next = [...graph.edges, ...manual]
+      const currentIds = current.map((edge) => edge.id)
+      const nextIds = next.map((edge) => edge.id)
+      return currentIds.length === nextIds.length && currentIds.every((id, index) => id === nextIds[index]) ? current : next
+    })
+  }, [graph.edges, graph.nodes, manualEdges, setEdges])
+
+  useEffect(() => {
+    onManualEdgesChange(edges.filter((edge) => edge.id.startsWith('edge-user-')))
+  }, [edges, onManualEdgesChange])
+
+  const connect = useCallback((connection: Connection) => {
+    setEdges((current) => {
+      const next = addEdge({ ...connection, id: `edge-user-${Date.now()}-${current.length}`, animated: false, style: { stroke: '#7a8b82' } }, current)
+      onConnectNodes(next.filter((edge) => edge.id.startsWith('edge-user-')).length)
+      return next as Edge<FlowCardData>[]
+    })
+  }, [onConnectNodes, setEdges])
+
+  return (
+    <div className="flow-canvas" role="region" aria-label="Diagrama de flujo interactivo">
+      {graph.error ? (
+        <div className="diagram-error"><span className="error-dot" /> {graph.error}</div>
+      ) : graph.nodes.length === 0 ? (
+        <div className="canvas-empty">
+          <div className="canvas-empty__glyph">{'{ }'}</div>
+          <strong>El diagrama aparecerá aquí</strong>
+          <span>Escribe una función, variable o condición para comenzar.</span>
+        </div>
+      ) : (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={connect}
+          onNodeClick={(_, node) => onSelectNode(node.id)}
+          fitView
+          fitViewOptions={{ padding: 0.22 }}
+          minZoom={0.25}
+          maxZoom={1.6}
+          nodesConnectable
+          nodesDraggable
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="#26302d" gap={20} size={1} />
+          <Controls position="bottom-left" showInteractive={false} />
+          <MiniMap position="bottom-right" nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, #72807b)`} maskColor="rgba(7, 10, 13, 0.72)" />
+        </ReactFlow>
+      )}
+    </div>
+  )
+})
