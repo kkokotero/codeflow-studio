@@ -29,6 +29,15 @@ function emitReturn(line, localsJson, valueJson) {
   }
 }
 
+function emitOperation(operationId, line, localsJson, valueJson) {
+  if (!active || stepCount >= MAX_STEPS) return
+  try {
+    post({ type: 'operation', operationId, line, locals: JSON.parse(localsJson), operationValue: JSON.parse(valueJson), stack: [...stack], value: String(++stepCount) })
+  } catch {
+    post({ type: 'operation', operationId, line, locals: {}, operationValue: '[No serializable]', stack: [...stack], value: String(++stepCount) })
+  }
+}
+
 function enterFunction(name) {
   if (stack.length < STACK_LIMIT) stack.push(String(name))
 }
@@ -79,12 +88,17 @@ def __cf_clean(value, depth=0, seen=None):
     return repr(value)[:180]
 
 def __cf_trace(line, values):
-    clean = {key: __cf_clean(value) for key, value in values.items() if not key.startswith("__cf_") and not key.startswith("__" )}
+    clean = {key: __cf_clean(value) for key, value in values.items() if key != "print" and not key.startswith("__cf_") and not key.startswith("__" )}
     __cf_emit_step__(line, __cf_json.dumps(clean, ensure_ascii=True))
 
 def __cf_capture_return(line, value, values):
-    clean = {key: __cf_clean(item) for key, item in values.items() if not key.startswith("__cf_") and not key.startswith("__" )}
+    clean = {key: __cf_clean(item) for key, item in values.items() if key != "print" and not key.startswith("__cf_") and not key.startswith("__" )}
     __cf_emit_return__(line, __cf_json.dumps(clean, ensure_ascii=True), __cf_json.dumps(__cf_clean(value), ensure_ascii=True))
+    return value
+
+def __cf_record_operation(operation_id, line, value, values):
+    clean = {key: __cf_clean(item) for key, item in values.items() if key != "print" and not key.startswith("__cf_") and not key.startswith("__" )}
+    __cf_emit_operation__(operation_id, line, __cf_json.dumps(clean, ensure_ascii=True), __cf_json.dumps(__cf_clean(value), ensure_ascii=True))
     return value
 
 def __cf_print(*values, sep=" ", end="\\n", **kwargs):
@@ -117,6 +131,69 @@ class CodeFlowInstrumenter(cf_ast.NodeTransformer):
             else:
                 output.extend([transformed, trace])
         return output
+
+    def __cf_record_expression(self, node):
+        if not hasattr(node, "lineno") or not hasattr(node, "col_offset"):
+            return node
+        operation_id = "py-{}-{}-{}".format(node.lineno, node.col_offset, type(node).__name__)
+        locals_call = cf_ast.Call(func=cf_ast.Name(id="locals", ctx=cf_ast.Load()), args=[], keywords=[])
+        call = cf_ast.Call(
+            func=cf_ast.Name(id="__cf_record_operation", ctx=cf_ast.Load()),
+            args=[cf_ast.Constant(value=operation_id), cf_ast.Constant(value=node.lineno), node, locals_call],
+            keywords=[],
+        )
+        return cf_ast.copy_location(call, node)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, cf_ast.Load):
+            return self.__cf_record_expression(node)
+        return node
+
+    def visit_Constant(self, node):
+        return self.__cf_record_expression(node)
+
+    def visit_BinOp(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_BoolOp(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_Compare(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_UnaryOp(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_NamedExpr(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_IfExp(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_Attribute(self, node):
+        node = self.generic_visit(node)
+        return self.__cf_record_expression(node) if isinstance(node.ctx, cf_ast.Load) else node
+
+    def visit_Subscript(self, node):
+        node = self.generic_visit(node)
+        return self.__cf_record_expression(node) if isinstance(node.ctx, cf_ast.Load) else node
+
+    def visit_List(self, node):
+        node = self.generic_visit(node)
+        return self.__cf_record_expression(node) if isinstance(node.ctx, cf_ast.Load) else node
+
+    def visit_Tuple(self, node):
+        node = self.generic_visit(node)
+        return self.__cf_record_expression(node) if isinstance(node.ctx, cf_ast.Load) else node
+
+    def visit_Set(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_Dict(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
+
+    def visit_JoinedStr(self, node):
+        return self.__cf_record_expression(self.generic_visit(node))
 
     def visit_Module(self, node):
         node.body = self.__cf_body(node.body)
@@ -204,7 +281,7 @@ class CodeFlowInstrumenter(cf_ast.NodeTransformer):
     def visit_Call(self, node):
         if isinstance(node.func, cf_ast.Name) and node.func.id in {"eval", "exec", "compile", "__import__"}:
             raise RuntimeError("La ejecución dinámica de código está deshabilitada en el runtime aislado.")
-        return self.generic_visit(node)
+        return self.__cf_record_expression(self.generic_visit(node))
 `
 
 async function initializeRuntime() {
@@ -214,6 +291,7 @@ async function initializeRuntime() {
   pyodide.globals.set('__cf_emit_step__', emitStep)
   pyodide.globals.set('__cf_emit_output__', emitOutput)
   pyodide.globals.set('__cf_emit_return__', emitReturn)
+  pyodide.globals.set('__cf_emit_operation__', emitOperation)
   pyodide.globals.set('__cf_enter__', enterFunction)
   pyodide.globals.set('__cf_exit__', exitFunction)
   await pyodide.runPythonAsync('import math as __cf_math')
@@ -239,7 +317,7 @@ self.onmessage = async (event) => {
 __cf_tree = cf_ast.parse(__source_text, filename="<CodeFlow>", mode="exec")
 __cf_tree = CodeFlowInstrumenter().visit(__cf_tree)
 cf_ast.fix_missing_locations(__cf_tree)
-__cf_namespace = {"__name__": "__main__", "__builtins__": __cf_builtins_map, "__cf_trace": __cf_trace, "__cf_capture_return": __cf_capture_return, "__cf_enter": __cf_enter__, "__cf_exit": __cf_exit__, "__cf_emit_step__": __cf_emit_step__, "__cf_emit_output__": __cf_emit_output__, "__cf_math": __cf_math, "__cf_json": __cf_json}
+__cf_namespace = {"__name__": "__main__", "__builtins__": __cf_builtins_map, "__cf_trace": __cf_trace, "__cf_capture_return": __cf_capture_return, "__cf_enter": __cf_enter__, "__cf_exit": __cf_exit__, "__cf_emit_step__": __cf_emit_step__, "__cf_emit_output__": __cf_emit_output__, "__cf_emit_operation__": __cf_emit_operation__, "__cf_record_operation": __cf_record_operation, "__cf_math": __cf_math, "__cf_json": __cf_json}
 __cf_namespace["print"] = __cf_print
 exec(compile(__cf_tree, "<CodeFlow>", "exec"), __cf_namespace)
 `

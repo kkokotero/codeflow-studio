@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
+import { ColorThemeControls, useMaterialTheme } from '@/components/codeflow/color-theme-controls'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { analyzeCode } from '@/lib/diagram'
 import { starterFiles } from '@/lib/codeflow-examples'
@@ -51,6 +52,7 @@ function getExtension(name: string): Language {
 }
 
 export function CodeflowStudio() {
+  const { mode, setMode, seed, setSeed, isDark } = useMaterialTheme()
   const [files, setFiles] = useState<CodeFile[]>(starterFiles)
   const [activeFileId, setActiveFileId] = useState(starterFiles[0].id)
   const [status, setStatus] = useState<RunStatus>('idle')
@@ -95,6 +97,11 @@ export function CodeflowStudio() {
   const currentStep = trace[activeStep] ?? null
   const isRuntimeBusy = status === 'running' || status === 'loading'
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? null
+  const activeOperation = currentStep?.operationId ? graph.nodes.find((node) => node.data.operationId === currentStep.operationId) ?? null : null
+  const visibleTrace = useMemo(() => {
+    const start = Math.max(0, Math.min(activeStep - 50, trace.length - 100))
+    return trace.slice(start, start + 100).map((step, index) => ({ step, index: start + index }))
+  }, [activeStep, trace])
   const sortedVariables = useMemo(() => Object.entries(currentStep?.locals ?? {}).sort(([left], [right]) => left.localeCompare(right)), [currentStep])
   const visibleVariables = useMemo(() => sortedVariables.filter(([name]) => name.toLowerCase().includes(variableQuery.trim().toLowerCase())), [sortedVariables, variableQuery])
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
@@ -184,13 +191,13 @@ export function CodeflowStudio() {
         'editorIndentGuide.background1': '#202826',
       },
     })
-    editor.updateOptions({ theme: 'codeflow-graphite', glyphMargin: true, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
-    const listener = editor.onMouseDown((event) => {
+      editor.updateOptions({ theme: isDark ? 'codeflow-graphite' : 'vs', glyphMargin: true, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
+      const listener = editor.onMouseDown((event) => {
       if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !event.target.position) return
       const line = event.target.position.lineNumber
       setBreakpoints((current) => current.includes(line) ? current.filter((item) => item !== line) : [...current, line].sort((a, b) => a - b))
     })
-  }, [])
+  }, [isDark])
 
   const finishRun = useCallback((file: CodeFile) => {
     if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
@@ -271,8 +278,16 @@ export function CodeflowStudio() {
           workerRef.current = null
           setRuntimeReady(false)
         }, adapter.executionLimitMs)
-      } else if (message.type === 'step' && typeof message.line === 'number') {
-        const entry: TraceEntry = { id: traceBufferRef.current.length + 1, line: message.line, locals: message.locals ?? {}, stack: message.stack ?? [], ...(message.returnValue !== undefined ? { returnValue: message.returnValue } : {}) }
+      } else if ((message.type === 'step' || message.type === 'operation') && typeof message.line === 'number') {
+        const entry: TraceEntry = {
+          id: traceBufferRef.current.length + 1,
+          line: message.line,
+          locals: message.locals ?? {},
+          stack: message.stack ?? [],
+          ...(message.returnValue !== undefined ? { returnValue: message.returnValue } : {}),
+          ...(message.operationId ? { operationId: message.operationId } : {}),
+          ...(message.operationValue !== undefined ? { operationValue: message.operationValue } : {}),
+        }
         traceBufferRef.current.push(entry)
         if (traceBufferRef.current.length <= 2000) {
           setTrace([...traceBufferRef.current])
@@ -512,6 +527,7 @@ export function CodeflowStudio() {
         <div className="topbar-divider" />
         <div className="project-crumb"><Folder aria-hidden="true" /><span>proyectos</span><ChevronDown aria-hidden="true" /><span className="crumb-separator">/</span><strong>algoritmos-visuales</strong><ChevronDown aria-hidden="true" /></div>
         <div className="topbar-spacer" />
+        <ColorThemeControls mode={mode} seed={seed} onModeChange={setMode} onSeedChange={setSeed} />
         <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
         <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => setShowHelp(true)}><Keyboard aria-hidden="true" /></Button>
         <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
@@ -590,7 +606,7 @@ export function CodeflowStudio() {
               value={displayCode}
               onChange={(value) => updateActiveCode(value ?? '')}
               onMount={handleEditorMount}
-              theme="vs-dark"
+              theme={isDark ? 'codeflow-graphite' : 'vs'}
               options={{ automaticLayout: true, glyphMargin: true, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, scrollBeyondLastLine: false, wordWrap: 'off', tabSize: displayLanguage === 'python' ? 4 : 2, insertSpaces: true, suggestOnTriggerCharacters: true, quickSuggestions: true, accessibilitySupport: 'auto', readOnly: isRuntimeBusy || Boolean(historicalView) }}
             />
           </div>
@@ -603,9 +619,9 @@ export function CodeflowStudio() {
             <div className="diagram-actions"><span className="live-indicator"><span />{trace.length ? 'TRAZA REAL' : 'ESTRUCTURA'}</span><Button variant="ghost" size="icon-xs" aria-label="Exportar diagrama JSON" title="Exportar diagrama JSON" onClick={exportDiagram}><ArrowDownToLine aria-hidden="true" /></Button></div>
           </div>
           <div className="diagram-body">
-            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} onSelectNode={openLine} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
+            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} activeOperationId={currentStep?.operationId ?? null} onSelectNode={openLine} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
           </div>
-          <div className="diagram-footer"><span><span className="legend-swatch legend-swatch--function" />Función</span><span><span className="legend-swatch legend-swatch--condition" />Condición</span><span><span className="legend-swatch legend-swatch--variable" />Variable</span><span><span className="legend-swatch legend-swatch--event" />Evento</span><span className="diagram-footer__hint">Arrastra nodos · conecta para anotar</span></div>
+          <div className="diagram-footer"><span><span className="legend-swatch legend-swatch--function" />Función</span><span><span className="legend-swatch legend-swatch--condition" />Condición</span><span><span className="legend-swatch legend-swatch--variable" />Variable</span><span><span className="legend-swatch legend-swatch--operation" />Operación</span><span><span className="legend-swatch legend-swatch--phase" />Fase</span><span className="diagram-footer__hint">Datos y flujo de control</span></div>
         </section>
 
         <aside className={`inspector-pane workspace-panel ${mobilePane === 'inspector' ? 'mobile-active' : ''}`} aria-label="Inspector">
@@ -618,6 +634,7 @@ export function CodeflowStudio() {
           <div className="inspector-content">
             {inspectorTab === 'variables' && <>
               <div className="inspect-context"><span className={`status-badge status-badge--${status}`}>{status === 'running' ? 'EN EJECUCIÓN' : status === 'loading' ? 'INICIANDO' : status === 'error' ? 'ERROR' : status === 'paused' ? 'PAUSADO' : trace.length ? 'PASO REGISTRADO' : 'EN ESPERA'}</span><span>{currentStep ? `Línea ${currentStep.line}` : 'Sin paso activo'}</span></div>
+              {currentStep?.operationId && currentStep.operationValue !== undefined && <div className="operation-value-card"><span>RESULTADO DE OPERACIÓN</span>{activeOperation?.data.expression && <code>{activeOperation.data.expression}</code>}<pre>{formatValue(currentStep.operationValue)}</pre></div>}
               <label className="variable-search"><Search aria-hidden="true" /><input value={variableQuery} onChange={(event) => setVariableQuery(event.target.value)} placeholder="Buscar variable..." aria-label="Buscar variables" /></label>
               {visibleVariables.length ? <div className="variable-list" role="list" aria-label="Variables del paso actual">
                 {visibleVariables.map(([name, value]) => <div className="variable-card" role="listitem" key={name}><div className="variable-card__top"><span className="variable-name">{name}</span><span className={`value-type value-type--${valueKind(value)}`}>{valueKind(value)}</span></div><pre className="variable-value">{formatValue(value)}</pre></div>)}
@@ -672,9 +689,9 @@ export function CodeflowStudio() {
         {bottomTab === 'console' ? <div className="console-body" role="log" aria-live="polite" aria-label="Salida de consola">
           {logs.length ? logs.map((line, index) => <div className={`console-line ${line.startsWith('Error:') ? 'console-line--error' : ''}`} key={`${index}-${line}`}><span className="console-prompt">›</span><span>{line}</span></div>) : <div className="console-empty"><span>$</span> La salida de <code>console.log</code> y <code>print</code> aparecerá aquí.</div>}
         </div> : <div className="trace-body">
-          <div className="trace-progress" role="progressbar" aria-label="Progreso del registro" aria-valuemin={0} aria-valuemax={Math.max(trace.length - 1, 0)} aria-valuenow={Math.max(activeStep, 0)}><span style={{ width: `${trace.length > 1 ? Math.max(0, activeStep) / (trace.length - 1) * 100 : 0}%` }} /></div>
-          <div className="trace-summary"><span className="trace-summary__step">{trace.length ? `PASO ${String(Math.max(activeStep + 1, 1)).padStart(2, '0')} / ${String(trace.length).padStart(2, '0')}` : 'SIN REGISTRO'}</span><span className="trace-summary__line">{currentStep ? `Línea ${currentStep.line} · ${displayFileName}` : status === 'loading' ? 'Cargando runtime…' : 'Ejecuta el programa para registrar pasos'}</span><span className="trace-summary__origin">{trace.length ? 'valores reales · captura instrumentada' : 'instrumentación AST'}</span></div>
-          {trace.length > 0 && <div className="trace-ticks" aria-label="Pasos capturados">{trace.slice(0, 100).map((step, index) => <button key={step.id} type="button" aria-label={`Ir al paso ${step.id}, línea ${step.line}`} title={`Paso ${step.id} · línea ${step.line}`} className={`trace-tick ${index === activeStep ? 'is-active' : ''} ${breakpoints.includes(step.line) ? 'has-breakpoint' : ''}`} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(index) }} />)}</div>}
+          <input className="trace-scrubber" type="range" min={0} max={Math.max(trace.length - 1, 0)} step={1} value={Math.max(activeStep, 0)} disabled={!trace.length || isRuntimeBusy} aria-label="Buscar paso de ejecución" aria-valuetext={currentStep ? `Paso ${activeStep + 1} de ${trace.length} · línea ${currentStep.line}` : 'Sin pasos registrados'} onChange={(event) => { setIsPlaying(false); setStatus('paused'); setActiveStep(Number(event.currentTarget.value)) }} />
+          <div className="trace-summary"><span className="trace-summary__step">{trace.length ? `PASO ${String(Math.max(activeStep + 1, 1)).padStart(2, '0')} / ${String(trace.length).padStart(2, '0')}` : 'SIN REGISTRO'}</span><span className="trace-summary__line">{currentStep ? `Línea ${currentStep.line} · ${displayFileName}` : status === 'loading' ? 'Cargando runtime…' : 'Ejecuta el programa para registrar pasos'}</span><span className="trace-summary__origin">{currentStep?.operationId ? 'resultado de operación' : trace.length ? 'valores reales · captura instrumentada' : 'instrumentación AST'}</span></div>
+          {visibleTrace.length > 0 && <div className="trace-ticks" aria-label="Pasos capturados">{visibleTrace.map(({ step, index }) => <button key={step.id} type="button" aria-label={step.operationId ? `Ir a la operación ${step.id}, línea ${step.line}` : `Ir al paso ${step.id}, línea ${step.line}`} title={step.operationId ? `Operación ${step.id} · línea ${step.line}` : `Paso ${step.id} · línea ${step.line}`} className={`trace-tick ${index === activeStep ? 'is-active' : ''} ${breakpoints.includes(step.line) ? 'has-breakpoint' : ''}`} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(index) }} />)}</div>}
         </div>}
       </section>
 

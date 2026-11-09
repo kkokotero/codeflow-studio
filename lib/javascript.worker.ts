@@ -34,7 +34,7 @@ function pack(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown 
   return output
 }
 
-function instrument(source: string, traceName: string, enterName: string, exitName: string, returnName: string) {
+function instrument(source: string, traceName: string, enterName: string, exitName: string, returnName: string, operationName: string) {
   const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', 'jsx'] })
   if (ast.program.body.some((node) => t.isImportDeclaration(node) || t.isExportDeclaration(node))) throw new Error('La ejecución de imports/exports entre archivos todavía no está habilitada; ejecuta un archivo independiente.')
   const blockify = (path: import('@babel/traverse').NodePath<any>) => {
@@ -85,6 +85,63 @@ function instrument(source: string, traceName: string, enterName: string, exitNa
     ImportExpression() { throw new Error('Las importaciones dinámicas no están habilitadas en este runtime.') },
   })
 
+  const wrapOperation = (path: import('@babel/traverse').NodePath<any>) => {
+    if (!path.isExpression() || typeof path.node.start !== 'number') return
+    const parent = path.parentPath
+    const isAssignmentTarget = parent?.isAssignmentExpression() && parent.node.left === path.node
+    const isUpdateTarget = parent?.isUpdateExpression() && parent.node.argument === path.node
+    const isDeleteTarget = parent?.isUnaryExpression() && parent.node.operator === 'delete'
+    const isTypeofIdentifier = t.isIdentifier(path.node) && parent?.isUnaryExpression() && parent.node.operator === 'typeof'
+    const isCallTarget = (parent?.isCallExpression() || parent?.isOptionalCallExpression() || parent?.isNewExpression()) && parent.node.callee === path.node
+    if (isAssignmentTarget || isUpdateTarget || isDeleteTarget || isTypeofIdentifier || isCallTarget) return
+
+    const expression = path.node as t.Expression
+    const valuesName = path.scope.generateUidIdentifier('codeflowValues')
+    const bindings = Object.keys(path.scope.getAllBindings()).filter((name) => /^[$A-Z_a-z][$\w]*$/.test(name) && !name.startsWith('_codeflowValues') && ![traceName, enterName, exitName, returnName, operationName].includes(name))
+    const assignments = bindings.map((name) => t.tryStatement(
+      t.blockStatement([t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.identifier(valuesName.name), t.stringLiteral(name), true), t.identifier(name)))]),
+      t.catchClause(null, t.blockStatement([])),
+    ))
+    const getLocals = t.arrowFunctionExpression([], t.blockStatement([
+      t.variableDeclaration('const', [t.variableDeclarator(t.identifier(valuesName.name), t.objectExpression([]))]),
+      ...assignments,
+      t.returnStatement(t.identifier(valuesName.name)),
+    ]))
+    path.replaceWith(t.callExpression(t.identifier(operationName), [
+      t.stringLiteral(`js-${expression.start}-${expression.type}`),
+      t.numericLiteral(expression.loc?.start.line ?? 1),
+      expression,
+      getLocals,
+    ]))
+    path.skip()
+  }
+
+  traverse(ast, {
+    BinaryExpression: { exit: wrapOperation },
+    LogicalExpression: { exit: wrapOperation },
+    AssignmentExpression: { exit: wrapOperation },
+    UpdateExpression: { exit: wrapOperation },
+    UnaryExpression: { exit: wrapOperation },
+    ConditionalExpression: { exit: wrapOperation },
+    CallExpression: { exit: wrapOperation },
+    OptionalCallExpression: { exit: wrapOperation },
+    NewExpression: { exit: wrapOperation },
+    MemberExpression: { exit: wrapOperation },
+    OptionalMemberExpression: { exit: wrapOperation },
+    ArrayExpression: { exit: wrapOperation },
+    ObjectExpression: { exit: wrapOperation },
+    TemplateLiteral: { exit: wrapOperation },
+    SequenceExpression: { exit: wrapOperation },
+    ReferencedIdentifier: { exit: wrapOperation },
+    NumericLiteral: { exit: wrapOperation },
+    StringLiteral: { exit: wrapOperation },
+    BooleanLiteral: { exit: wrapOperation },
+    NullLiteral: { exit: wrapOperation },
+    BigIntLiteral: { exit: wrapOperation },
+    RegExpLiteral: { exit: wrapOperation },
+    ThisExpression: { exit: wrapOperation },
+  })
+
   const statements: Array<import('@babel/traverse').NodePath<t.Statement>> = []
   traverse(ast, {
     Statement(path) {
@@ -96,7 +153,7 @@ function instrument(source: string, traceName: string, enterName: string, exitNa
 
   for (const path of statements.reverse()) {
     if (!path.node || !path.parentPath) continue
-    const bindings = Object.keys(path.scope.getAllBindings()).filter((name) => /^[$A-Z_a-z][$\w]*$/.test(name) && !name.startsWith(traceName))
+    const bindings = Object.keys(path.scope.getAllBindings()).filter((name) => /^[$A-Z_a-z][$\w]*$/.test(name) && !name.startsWith('_codeflowValues') && !name.startsWith(traceName))
     const values = t.variableDeclaration('const', [t.variableDeclarator(t.identifier('__cf_values'), t.objectExpression([]))])
     const assignments = bindings.map((name) => t.tryStatement(
       t.blockStatement([t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.identifier('__cf_values'), t.stringLiteral(name), true), t.identifier(name)))]),
@@ -135,21 +192,34 @@ scope.onmessage = async (event: MessageEvent<{ code: string }>) => {
     const enterName = `__cf_enter_${crypto.randomUUID().replaceAll('-', '')}`
     const exitName = `__cf_exit_${crypto.randomUUID().replaceAll('-', '')}`
     const returnName = `__cf_return_${crypto.randomUUID().replaceAll('-', '')}`
-    for (const name of [traceName, enterName, exitName, returnName]) if (code.includes(name)) throw new Error('El código incluye un identificador reservado por el runtime.')
-    const executable = instrument(code, traceName, enterName, exitName, returnName)
+    const operationName = `__cf_operation_${crypto.randomUUID().replaceAll('-', '')}`
+    for (const name of [traceName, enterName, exitName, returnName, operationName]) if (code.includes(name)) throw new Error('El código incluye un identificador reservado por el runtime.')
+    const executable = instrument(code, traceName, enterName, exitName, returnName, operationName)
     const stack: string[] = []
     let index = 0
-    const recordStep = (line: number, getLocals: () => Record<string, unknown>, returnValue?: unknown, hasReturnValue = false) => {
+    const recordStep = (line: number, getLocals: () => Record<string, unknown>, returnValue?: unknown, hasReturnValue = false, operationId?: string, operationValue?: unknown) => {
       if (index >= MAX_STEPS) return
       let locals: Record<string, unknown> = {}
       try { locals = pack(getLocals()) as Record<string, unknown> }
       catch { locals = { notice: 'No se pudieron leer todas las variables de este paso.' } }
-      send({ type: 'step', line, locals, stack: [...stack], value: String(index + 1), ...(hasReturnValue ? { returnValue: pack(returnValue) } : {}) })
+      send({
+        type: operationId ? 'operation' : 'step',
+        line,
+        locals,
+        stack: [...stack],
+        value: String(index + 1),
+        ...(hasReturnValue ? { returnValue: pack(returnValue) } : {}),
+        ...(operationId ? { operationId, operationValue: pack(operationValue) } : {}),
+      })
       index += 1
     }
     const trace = (line: number, getLocals: () => Record<string, unknown>) => recordStep(line, getLocals)
     const captureReturn = (line: number, value: unknown, getLocals: () => Record<string, unknown>) => {
       recordStep(line, getLocals, value, true)
+      return value
+    }
+    const captureOperation = (operationId: string, line: number, value: unknown, getLocals: () => Record<string, unknown>) => {
+      recordStep(line, getLocals, undefined, false, operationId, value)
       return value
     }
     const enter = (name: string) => { if (stack.length < 64) stack.push(name) }
@@ -162,10 +232,10 @@ scope.onmessage = async (event: MessageEvent<{ code: string }>) => {
     const consoleProxy = safeConsole()
     send({ type: 'ready' })
     const sandbox = new Function(
-      traceName, enterName, exitName, returnName, 'console', 'fetch', 'importScripts', 'WebSocket', 'globalThis', 'self', 'Function', 'eval', 'postMessage', 'XMLHttpRequest', 'EventSource', 'WebTransport',
+      traceName, enterName, exitName, returnName, operationName, 'console', 'fetch', 'importScripts', 'WebSocket', 'globalThis', 'self', 'Function', 'eval', 'postMessage', 'XMLHttpRequest', 'EventSource', 'WebTransport',
       `return (function () {\n"use strict";\n${executable}\n}).call(Object.freeze(Object.create(null)));`,
     )
-    await Promise.resolve(sandbox(trace, enter, exit, captureReturn, consoleProxy, deny, deny, undefined, Object.freeze({}), Object.freeze({}), deny, deny, deny, undefined, undefined, undefined))
+    await Promise.resolve(sandbox(trace, enter, exit, captureReturn, captureOperation, consoleProxy, deny, deny, undefined, Object.freeze({}), Object.freeze({}), deny, deny, deny, undefined, undefined, undefined))
     send({ type: 'done' })
   } catch (error) {
     send({ type: 'error', error: error instanceof Error ? error.message : String(error) })

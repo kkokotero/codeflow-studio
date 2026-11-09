@@ -6,12 +6,10 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
-  addEdge,
   useEdgesState,
   useNodesState,
   useReactFlow,
   type Connection,
-  type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { FlowNode } from '@/components/codeflow/flow-node'
@@ -31,14 +29,23 @@ function AutoFit({ nodeKey }: { nodeKey: string }) {
 interface FlowCanvasProps {
   graph: DiagramGraph
   activeLine: number | null
+  activeOperationId: string | null
   onSelectNode: (nodeId: string) => void
   manualEdges: FlowCardEdge[]
   onManualEdgesChange: (edges: FlowCardEdge[]) => void
   onConnectNodes: (edgeCount: number) => void
 }
 
-export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeLine, onSelectNode, onManualEdgesChange, onConnectNodes }: FlowCanvasProps) {
-  const activeNodes = useMemo(() => graph.nodes.map((node) => ({ ...node, data: { ...node.data, active: node.data.line === activeLine } })), [activeLine, graph.nodes])
+export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeLine, activeOperationId, onSelectNode, onManualEdgesChange, onConnectNodes }: FlowCanvasProps) {
+  const activeNodes = useMemo(() => graph.nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      active: node.data.kind === 'operation' && activeOperationId
+        ? node.data.operationId === activeOperationId
+        : node.data.line === activeLine,
+    },
+  })), [activeLine, activeOperationId, graph.nodes])
   const [nodes, setNodes, onNodesChange] = useNodesState(activeNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState([...graph.edges, ...manualEdges])
 
@@ -67,9 +74,21 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
 
   const connect = useCallback((connection: Connection) => {
     setEdges((current) => {
-      const next = addEdge({ ...connection, id: `edge-user-${Date.now()}-${current.length}`, animated: false, style: { stroke: '#7a8b82' } }, current)
+      if (!connection.source || !connection.target) return current
+      const isDuplicate = current.some((edge) => edge.source === connection.source && edge.target === connection.target)
+      if (isDuplicate) return current
+      const next: FlowCardEdge[] = [...current, {
+        id: `edge-user-${Date.now()}-${current.length}`,
+        source: connection.source,
+        target: connection.target,
+        sourceHandle: connection.sourceHandle,
+        targetHandle: connection.targetHandle,
+        animated: false,
+        style: { stroke: '#7a8b82' },
+        data: { role: 'control' },
+      }]
       onConnectNodes(next.filter((edge) => edge.id.startsWith('edge-user-')).length)
-      return next as Edge<FlowCardData>[]
+      return next
     })
   }, [onConnectNodes, setEdges])
 
