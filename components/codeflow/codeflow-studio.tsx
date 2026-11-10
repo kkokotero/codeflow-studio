@@ -18,6 +18,7 @@ import { AchievementsView } from '@/components/codeflow/achievements-view'
 import { ACHIEVEMENTS, createAchievementProfile, isAchievementProfile, recordAchievementActivity, type AchievementActivity, type AchievementDefinition } from '@/lib/achievements'
 import { analyzeCode } from '@/lib/diagram'
 import { starterFiles } from '@/lib/codeflow-examples'
+import { SUPPORTED_LANGUAGES, LANGUAGE_DEFINITIONS, acceptedFileExtensions, getLanguageDefinition, isLanguage, languageFromFileName } from '@/lib/languages'
 import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
 import type { CodeFile, ExecutionOutput, Language, RunSnapshot, RunStatus, SafeValue, SandboxExecutionResult, TraceEntry } from '@/lib/codeflow-types'
 
@@ -26,8 +27,6 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
   loading: () => <div className="editor-loading"><LoaderCircle className="spin" aria-hidden="true" /> Preparando el editor</div>,
 })
 
-const languageNames: Record<Language, string> = { javascript: 'JavaScript', python: 'Python' }
-const runtimeNames: Record<Language, string> = { javascript: 'Node 24 · aislado', python: 'Python 3.14 · aislado' }
 const achievementStorageKey = 'codeflow-achievements-v1'
 
 type InspectorTab = 'variables' | 'stack' | 'history'
@@ -51,7 +50,7 @@ function formatBytes(bytes: number): string {
 }
 
 function getExtension(name: string): Language {
-  return name.toLowerCase().endsWith('.py') ? 'python' : 'javascript'
+  return languageFromFileName(name) ?? 'javascript'
 }
 
 export function CodeflowStudio() {
@@ -394,7 +393,7 @@ export function CodeflowStudio() {
   const addFile = useCallback(() => {
     const language = activeFile.language
     const number = files.length + 1
-    const extension = language === 'python' ? 'py' : 'js'
+    const extension = getLanguageDefinition(language).extension
     const name = `src/nuevo-${number}.${extension}`
     const id = `file-${Date.now()}`
     setHistoricalView(null)
@@ -424,17 +423,21 @@ export function CodeflowStudio() {
           if (bundle.format !== 'codeflow-project' || bundle.version !== 1 || !Array.isArray(bundle.files)) throw new Error('El archivo no es un proyecto CodeFlow válido.')
           if (bundle.files.length > 50) throw new Error('El proyecto contiene más de 50 archivos.')
           for (const entry of bundle.files) {
-            if (typeof entry.name !== 'string' || typeof entry.code !== 'string' || (entry.language !== 'javascript' && entry.language !== 'python')) throw new Error('El proyecto contiene un archivo no válido.')
+            if (typeof entry.name !== 'string' || typeof entry.code !== 'string' || !isLanguage(entry.language)) throw new Error('El proyecto contiene un archivo no válido.')
             const name = cleanName(entry.name)
-            if (entry.language === 'python' ? !name.toLowerCase().endsWith('.py') : !/\.(js|jsx|mjs)$/i.test(name)) throw new Error(`La extensión de ${name} no coincide con su runtime.`)
+            const detected = languageFromFileName(name)
+            const compatible = detected === entry.language
+              || (entry.language === 'cpp' && /\.(h|hh|hpp|hxx)$/i.test(name))
+              || (entry.language === 'c' && /\.h$/i.test(name))
+            if (!compatible) throw new Error(`La extensión de ${name} no coincide con su runtime.`)
             imported.push({ id: createId(), name, language: entry.language, code: entry.code })
           }
-        } else if (/\.(js|jsx|mjs|py)$/i.test(item.name)) {
+        } else if (languageFromFileName(item.name)) {
           imported.push({ id: createId(), name: `imports/${cleanName(item.name)}`, language: getExtension(item.name), code: text })
         }
       }
       if (!imported.length) {
-        setNotice('Importa archivos .js, .jsx, .mjs, .py o un proyecto .codeflow.json.')
+        setNotice('Importa archivos de código compatibles o un proyecto .codeflow.json.')
         return
       }
       if (imported.length > 50) throw new Error('El proyecto contiene más de 50 archivos.')
@@ -553,29 +556,19 @@ export function CodeflowStudio() {
       <section className="toolbar" aria-label="Controles del proyecto">
         <div className="toolbar-left">
           <div className="runtime-select-wrap">
-            <span className={`language-mark language-mark--${displayLanguage}`}>{displayLanguage === 'python' ? 'Py' : 'JS'}</span>
+            <span className={`language-mark language-mark--${displayLanguage}`}>{getLanguageDefinition(displayLanguage).mark}</span>
             <select aria-label="Lenguaje del archivo" value={displayLanguage} disabled={isRuntimeBusy || Boolean(historicalView)} onChange={(event) => {
               const language = event.target.value as Language
               if (language !== activeFile.language) recordProgress({ type: 'explore', feature: 'language' })
               setHistoricalView(null)
-              const extension = language === 'python' ? '.py' : '.js'
-              setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, language, name: file.name.replace(/\.(js|jsx|mjs|py)$/i, extension) } : file))
+              const extension = getLanguageDefinition(language).extension
+              setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, language, name: /\.[^./]+$/.test(file.name) ? file.name.replace(/\.[^./]+$/, `.${extension}`) : `${file.name}.${extension}` } : file))
             }}>
-              <option value="javascript">JavaScript</option>
-              <option value="python">Python</option>
-              <optgroup label="Próximamente · sin runtime">
-                <option value="typescript" disabled>TypeScript</option>
-                <option value="lua" disabled>Lua</option>
-                <option value="java" disabled>Java</option>
-                <option value="c" disabled>C / C++</option>
-                <option value="csharp" disabled>C#</option>
-                <option value="go" disabled>Go</option>
-                <option value="rust" disabled>Rust</option>
-              </optgroup>
+              {SUPPORTED_LANGUAGES.map((language) => <option key={language} value={language}>{LANGUAGE_DEFINITIONS[language].label}</option>)}
             </select>
             <ChevronDown aria-hidden="true" />
           </div>
-          <span className="runtime-pill"><span className="runtime-dot" />{runtimeNames[displayLanguage]}</span>
+          <span className="runtime-pill"><span className="runtime-dot" />{getLanguageDefinition(displayLanguage).runtimeName}</span>
           <span className="toolbar-divider" />
           <span className="file-title"><FileCode2 aria-hidden="true" />{displayFileName}</span>
         </div>
@@ -590,7 +583,7 @@ export function CodeflowStudio() {
           <Button variant="ghost" size="icon-sm" aria-label="Exportar archivo" title="Exportar archivo" onClick={exportActiveFile}><ArrowDownToLine aria-hidden="true" /></Button>
           <Button variant="ghost" size="icon-sm" aria-label="Exportar proyecto" title="Exportar proyecto CodeFlow" onClick={exportProject}><Folder aria-hidden="true" /></Button>
           <Button variant="ghost" size="icon-sm" aria-label="Importar código" title="Importar archivos o proyecto" onClick={() => fileInputRef.current?.click()} disabled={isImporting}><Import aria-hidden="true" /></Button>
-          <input ref={fileInputRef} type="file" accept=".js,.jsx,.mjs,.py,.codeflow.json" multiple className="visually-hidden" onChange={(event) => void importFiles(event.target.files)} aria-label="Seleccionar archivos para importar" />
+          <input ref={fileInputRef} type="file" accept={`${acceptedFileExtensions()},.codeflow.json`} multiple className="visually-hidden" onChange={(event) => void importFiles(event.target.files)} aria-label="Seleccionar archivos para importar" />
         </div>
       </section>
 
@@ -602,7 +595,7 @@ export function CodeflowStudio() {
           <div className="file-list" role="list" aria-label="Archivos">
             {filteredFiles.map((file) => (
               <button className={`file-row ${activeFileId === file.id ? 'is-active' : ''}`} type="button" role="listitem" key={file.id} onClick={() => { setHistoricalView(null); setActiveFileId(file.id); setSelectedNodeId(null); setManualEdges([]); setTrace([]); setLogs([]); setActiveStep(-1); setStatus('idle') }} disabled={isRuntimeBusy}>
-                <span className={`file-language file-language--${file.language}`}>{file.language === 'python' ? 'Py' : 'JS'}</span><span className="file-name">{file.name.split('/').at(-1)}</span>{activeFileId === file.id && <span className="file-edited-dot" aria-label="Archivo abierto" />}
+                <span className={`file-language file-language--${file.language}`}>{getLanguageDefinition(file.language).mark}</span><span className="file-name">{file.name.split('/').at(-1)}</span>{activeFileId === file.id && <span className="file-edited-dot" aria-label="Archivo abierto" />}
               </button>
             ))}
             {filteredFiles.length === 0 && <div className="file-empty">No se encontraron archivos</div>}
@@ -614,21 +607,21 @@ export function CodeflowStudio() {
         <section className={`editor-pane workspace-panel ${mobilePane === 'editor' ? 'mobile-active' : ''}`} aria-label="Editor de código">
           <div className="panel-titlebar">
             <div className="panel-title"><Code2 aria-hidden="true" /><span>CÓDIGO</span><span className="panel-title__muted">·</span><span className="panel-title__file">{displayFileName.split('/').at(-1)}</span>{historicalView && <span className="history-mode-tag">SNAPSHOT · SOLO LECTURA</span>}</div>
-            <div className="editor-actions"><span className="editor-language-tag">{languageNames[displayLanguage]}</span>{historicalView ? <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button> : <Button variant="ghost" size="icon-xs" aria-label="Restablecer ejemplo" title="Restablecer archivo actual" onClick={() => { const original = starterFiles.find((file) => file.id === activeFile.id); if (original) updateActiveCode(original.code); else updateActiveCode('') }}><RotateCcw aria-hidden="true" /></Button>}</div>
+            <div className="editor-actions"><span className="editor-language-tag">{getLanguageDefinition(displayLanguage).label}</span>{historicalView ? <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button> : <Button variant="ghost" size="icon-xs" aria-label="Restablecer ejemplo" title="Restablecer archivo actual" onClick={() => { const original = starterFiles.find((file) => file.id === activeFile.id); if (original) updateActiveCode(original.code); else updateActiveCode('') }}><RotateCcw aria-hidden="true" /></Button>}</div>
           </div>
           <div className="editor-wrap">
             <CodeEditor
               key={`${activeFile.id}-${displayLanguage}-${historicalView?.id ?? 'current'}`}
               height="100%"
-              language={displayLanguage === 'python' ? 'python' : 'javascript'}
+              language={getLanguageDefinition(displayLanguage).monacoLanguage}
               value={displayCode}
               onChange={(value) => updateActiveCode(value ?? '')}
               onMount={handleEditorMount}
               theme={isDark ? 'codeflow-graphite' : 'vs'}
-              options={{ automaticLayout: true, glyphMargin: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, scrollBeyondLastLine: false, wordWrap: 'off', tabSize: displayLanguage === 'python' ? 4 : 2, insertSpaces: true, suggestOnTriggerCharacters: true, quickSuggestions: true, accessibilitySupport: 'auto', readOnly: isRuntimeBusy || Boolean(historicalView) }}
+              options={{ automaticLayout: true, glyphMargin: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, scrollBeyondLastLine: false, wordWrap: 'off', tabSize: getLanguageDefinition(displayLanguage).tabSize, insertSpaces: true, suggestOnTriggerCharacters: true, quickSuggestions: true, accessibilitySupport: 'auto', readOnly: isRuntimeBusy || Boolean(historicalView) }}
             />
           </div>
-          <div className="editor-footer"><span><CircleDot aria-hidden="true" />{displayCode.split('\n').length} líneas</span><span>Sin traza por línea</span><span>UTF-8</span><span>{displayLanguage === 'python' ? 'Spaces: 4' : 'Spaces: 2'}</span></div>
+          <div className="editor-footer"><span><CircleDot aria-hidden="true" />{displayCode.split('\n').length} líneas</span><span>Sin traza por línea</span><span>UTF-8</span><span>Spaces: {getLanguageDefinition(displayLanguage).tabSize}</span></div>
         </section>
 
         <section className={`diagram-pane workspace-panel ${mobilePane === 'diagram' ? 'mobile-active' : ''}`} aria-label="Diagrama del código">
@@ -719,7 +712,7 @@ export function CodeflowStudio() {
         <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} onClick={() => setMobilePane('inspector')}><PanelRight aria-hidden="true" />Inspector</button>
       </nav>
 
-      <footer className="statusbar"><span><span className={`statusbar-dot statusbar-dot--${status}`} />{status === 'loading' || status === 'running' ? 'Ejecutando en microVM' : status === 'error' ? 'Error de ejecución' : status === 'stopped' ? 'Ejecución detenida' : status === 'complete' ? 'Ejecución completada' : 'Runtime aislado'}</span><span>Sin red · 8 s · salida 16 KB máx.</span><span>{graph.nodes.length} símbolos de flujo</span><span className="statusbar-right">{displayLanguage === 'python' ? 'Python · Lezer' : 'JavaScript · Babel AST'}<span>·</span> UTF-8</span></footer>
+      <footer className="statusbar"><span><span className={`statusbar-dot statusbar-dot--${status}`} />{status === 'loading' || status === 'running' ? 'Ejecutando en microVM' : status === 'error' ? 'Error de ejecución' : status === 'stopped' ? 'Ejecución detenida' : status === 'complete' ? 'Ejecución completada' : 'Runtime aislado'}</span><span>Sin red · 15 s compilación · 8 s ejecución · salida 16 KB máx.</span><span>{graph.nodes.length} símbolos de flujo</span><span className="statusbar-right">{getLanguageDefinition(displayLanguage).analyzerName}<span>·</span> UTF-8</span></footer>
       </>}
       {achievementToasts[0] && <div className="achievement-toast" role="status" aria-live="polite"><span className="achievement-toast__icon"><Trophy aria-hidden="true" /></span><span><small>LOGRO DESBLOQUEADO · +{achievementToasts[0].xp} XP</small><strong>{achievementToasts[0].name}</strong></span><button type="button" aria-label="Cerrar notificación" onClick={() => setAchievementToasts((current) => current.slice(1))}><X aria-hidden="true" /></button></div>}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}

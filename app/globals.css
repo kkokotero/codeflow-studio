@@ -299,7 +299,15 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
 .runtime-select-wrap > svg { width: 12px; height: 12px; color: #7e8984; pointer-events: none; }
 .language-mark, .file-language { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; font: 700 9px Geist Mono, ui-monospace, monospace; }
 .language-mark--javascript, .file-language--javascript { color: #dcc879; background: #433d21; }
+.language-mark--typescript, .file-language--typescript { color: #8ec8f0; background: #1d3a4d; }
 .language-mark--python, .file-language--python { color: #84b5da; background: #213b4a; }
+.language-mark--lua, .file-language--lua { color: #a8b6ef; background: #272d56; }
+.language-mark--java, .file-language--java { color: #e9a58f; background: #4a2a22; }
+.language-mark--c, .file-language--c { color: #9dc4e0; background: #233a4a; }
+.language-mark--cpp, .file-language--cpp { color: #b4b9f0; background: #2c2f56; }
+.language-mark--csharp, .file-language--csharp { color: #a6d5a1; background: #253f2a; }
+.language-mark--go, .file-language--go { color: #8bd5e4; background: #1d3f49; }
+.language-mark--rust, .file-language--rust { color: #e2a98d; background: #463026; }
 .runtime-pill { display: inline-flex; align-items: center; gap: 6px; color: #8e9b95; font: 10px Geist Mono, ui-monospace, monospace; white-space: nowrap; }
 .runtime-dot { width: 5px; height: 5px; }
 .toolbar-divider { height: 17px; border-left: 1px solid #303936; }

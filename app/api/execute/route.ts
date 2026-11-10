@@ -1,10 +1,10 @@
 import { checkExecutionRateLimit } from '@/lib/execute-rate-limit'
 import { executeInSandbox } from '@/lib/secure-code-execution'
-import type { Language } from '@/lib/codeflow-types'
-import { MAX_EXECUTION_SOURCE_BYTES } from '@/lib/runtime-safety'
+import { isLanguage, type Language } from '@/lib/languages'
+import { MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTIONS_PER_MINUTE } from '@/lib/runtime-safety'
 
 export const runtime = 'nodejs'
-export const maxDuration = 30
+export const maxDuration = 90
 
 const MAX_REQUEST_BYTES = MAX_EXECUTION_SOURCE_BYTES + 1_024
 const responseHeaders = {
@@ -69,7 +69,7 @@ async function readLimitedBody(request: Request) {
 function parseExecutionRequest(value: unknown): { language: Language; code: string } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const body = value as Record<string, unknown>
-  if ((body.language !== 'javascript' && body.language !== 'python') || typeof body.code !== 'string') return null
+  if (!isLanguage(body.language) || typeof body.code !== 'string') return null
   if (Buffer.byteLength(body.code, 'utf8') > MAX_EXECUTION_SOURCE_BYTES) return null
   return { language: body.language, code: body.code }
 }
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     if (!rate.success) {
       const retryAfterSeconds = Math.max(1, Math.ceil((rate.reset - Date.now()) / 1_000))
       return jsonResponse(
-        { error: 'Se alcanzó el límite de 5 ejecuciones por minuto. Inténtalo de nuevo en un momento.' },
+        { error: `Se alcanzó el límite de ${MAX_EXECUTIONS_PER_MINUTE.toLocaleString('es')} ejecuciones por minuto. Inténtalo de nuevo en un momento.` },
         429,
         { 'Retry-After': String(retryAfterSeconds) },
       )

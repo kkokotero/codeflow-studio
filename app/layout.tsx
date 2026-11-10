@@ -4,7 +4,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'CodeFlow Studio — diagramas de flujo estáticos',
-  description: 'Editor visual para analizar la lógica de JavaScript y Python sin ejecutar código arbitrario.',
+  description: 'Editor visual para analizar y ejecutar JavaScript, TypeScript, Python, Java, C, C++, C#, Go, Rust y Lua sin ejecutar código arbitrario.',
   applicationName: 'CodeFlow Studio',
   generator: 'v0.app',
   icons: {

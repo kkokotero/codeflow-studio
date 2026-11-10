@@ -1,4 +1,5 @@
 import type { Language } from './codeflow-types'
+import { isLanguage } from './languages'
 
 export type AchievementCategory = 'Código' | 'Ejecución' | 'Exploración' | 'Constancia' | 'Construcción' | 'Dominio'
 export type AchievementDifficulty = 'Inicial' | 'Fácil' | 'Intermedio' | 'Avanzado' | 'Experto'
@@ -70,7 +71,7 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   { id: 'debugger', name: 'Solucionador', description: 'Recupérate de un error y vuelve a ejecutar con éxito.', hint: 'Provoca o encuentra un error, corrige el código y vuelve a ejecutarlo.', condition: 'Tras una ejecución fallida, editar el código y completar una ejecución correcta.', category: 'Ejecución', difficulty: 'Intermedio', xp: 40, icon: 'Bug', progress: (stats) => progress(Number(stats.hasFixedError), 1), isComplete: (stats) => stats.hasFixedError },
   { id: 'steady', name: 'Constancia', description: 'Completa tres ejecuciones correctas seguidas.', hint: 'Cada ejecución correcta consecutiva suma; un error reinicia la racha.', condition: 'Completar 3 ejecuciones correctas consecutivas.', category: 'Constancia', difficulty: 'Intermedio', xp: 45, icon: 'Flame', progress: (stats) => progress(stats.consecutiveSuccessfulRuns, 3), isComplete: (stats) => reached(stats.consecutiveSuccessfulRuns, 3) },
   { id: 'builder', name: 'Constructor', description: 'Crea un programa que produzca una salida útil.', hint: 'Combina varias instrucciones y comprueba su resultado en la consola.', condition: 'Escribir código y ejecutar con éxito un programa de 3 o más nodos que produzca salida.', category: 'Construcción', difficulty: 'Intermedio', xp: 60, icon: 'Hammer', progress: (stats) => progress(Number(stats.hasBuiltProgram), 1), isComplete: (stats) => stats.hasBuiltProgram },
-  { id: 'polyglot', name: 'Políglota', description: 'Programa y ejecuta en ambos lenguajes disponibles.', hint: 'Completa una ejecución correcta en JavaScript y otra en Python.', condition: 'Ejecutar correctamente al menos un programa en cada lenguaje.', category: 'Dominio', difficulty: 'Intermedio', xp: 55, icon: 'Languages', progress: (stats) => progress(stats.languagesUsed.length, 2), isComplete: (stats) => stats.languagesUsed.length >= 2 },
+  { id: 'polyglot', name: 'Políglota', description: 'Programa y ejecuta en dos lenguajes distintos.', hint: 'Completa una ejecución correcta en dos lenguajes diferentes.', condition: 'Ejecutar correctamente al menos un programa en cada uno de dos lenguajes.', category: 'Dominio', difficulty: 'Intermedio', xp: 55, icon: 'Languages', progress: (stats) => progress(stats.languagesUsed.length, 2), isComplete: (stats) => stats.languagesUsed.length >= 2 },
   { id: 'loop-maker', name: 'Bucle virtuoso', description: 'Construye y ejecuta correctamente un ciclo.', hint: 'Prueba for o while y observa su representación en el diagrama.', condition: 'Completar una ejecución correcta cuyo flujo contenga un ciclo.', category: 'Construcción', difficulty: 'Avanzado', xp: 65, icon: 'Repeat2', progress: (stats) => progress(Number(stats.hasUsedLoop), 1), isComplete: (stats) => stats.hasUsedLoop },
   { id: 'refactor', name: 'Segunda versión', description: 'Mejora un programa después de ejecutarlo.', hint: 'Tras una ejecución correcta, modifica el código y vuelve a ejecutarlo.', condition: 'Editar código después de una ejecución correcta y luego ejecutar con éxito.', category: 'Código', difficulty: 'Avanzado', xp: 70, icon: 'WandSparkles', progress: (stats) => progress(Number(stats.hasRunAfterRefinement), 1), isComplete: (stats) => stats.hasRunAfterRefinement },
   { id: 'architect', name: 'Arquitecto', description: 'Diseña un flujo de programa amplio y funcional.', hint: 'Combina funciones, decisiones y varias instrucciones en un mismo programa.', condition: 'Escribir código y ejecutar correctamente un programa con 8 o más nodos y una decisión o ciclo.', category: 'Construcción', difficulty: 'Avanzado', xp: 100, icon: 'Blocks', progress: (stats) => progress(stats.largestAdvancedProgramNodeCount, 8), isComplete: (stats) => stats.hasAdvancedProgram },
@@ -127,7 +128,7 @@ export function isAchievementProfile(value: unknown): value is AchievementProfil
     && typeof stats.hasFixedError === 'boolean'
     && typeof stats.hasHelloWorld === 'boolean'
     && Array.isArray(stats.languagesUsed)
-    && stats.languagesUsed.every((language) => language === 'javascript' || language === 'python')
+    && stats.languagesUsed.every((language) => isLanguage(language))
     && typeof stats.hasExploredFeature === 'boolean'
     && typeof stats.hasExploredDiagram === 'boolean'
     && typeof stats.hasCreatedFile === 'boolean'

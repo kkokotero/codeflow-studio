@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react'
+import type { Language } from '@/lib/languages'
 
-export type Language = 'javascript' | 'python'
+export type { Language }
 export type NodeKind = 'start' | 'end' | 'connector' | 'io' | 'function' | 'variable' | 'object' | 'event' | 'condition' | 'loop' | 'class' | 'call' | 'return' | 'import' | 'statement' | 'operation' | 'phase'
 export type FlowShape = 'terminator' | 'process' | 'decision' | 'input-output' | 'connector'
 export type OperationCategory = 'read' | 'write' | 'literal' | 'arithmetic' | 'comparison' | 'logical' | 'assignment' | 'call' | 'access' | 'collection' | 'conditional' | 'unary' | 'template'
