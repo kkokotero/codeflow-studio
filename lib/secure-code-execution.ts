@@ -15,15 +15,14 @@ import {
 const SANDBOX_DIRECTORY = '/vercel/sandbox'
 const SANDBOX_TIMEOUT_MS = 90_000
 
-// The sandbox only reaches the Ubuntu package mirrors while provisioning a
-// toolchain. The policy is switched back to deny-all before user code runs.
+// The sandbox only reaches package mirrors while provisioning a toolchain.
+// The policy is switched back to deny-all before user code runs.
 const TOOLCHAIN_NETWORK_POLICY = {
   allow: [
     'archive.ubuntu.com',
     'security.ubuntu.com',
     'ports.ubuntu.com',
     '*.ubuntu.com',
-    'ubuntu.com',
     'deb.debian.org',
     '*.debian.org',
   ],
@@ -37,6 +36,13 @@ class OutputCapture {
 
   setStopProcess(stopProcess: () => void) {
     this.stopProcess = stopProcess
+  }
+
+  append(stream: ExecutionOutput['stream'], text: string) {
+    if (!text) return
+    const previous = this.output.at(-1)
+    if (previous?.stream === stream) previous.text += text
+    else this.output.push({ stream, text })
   }
 
   createStream(stream: ExecutionOutput['stream']) {
@@ -66,25 +72,45 @@ class OutputCapture {
       },
     })
   }
+}
 
-  private append(stream: ExecutionOutput['stream'], text: string) {
-    if (!text) return
-    const previous = this.output.at(-1)
-    if (previous?.stream === stream) previous.text += text
-    else this.output.push({ stream, text })
+function runtimeEnv(language: Language): Record<string, string> {
+  const base: Record<string, string> = {
+    HOME: '/tmp',
+    TMPDIR: '/tmp',
   }
+  if (language === 'go') {
+    base.GOCACHE = '/tmp/go-cache'
+    base.GOPATH = '/tmp/go'
+    base.GOMODCACHE = '/tmp/go/pkg/mod'
+  }
+  if (language === 'rust') {
+    base.CARGO_HOME = '/tmp/cargo'
+    base.RUSTUP_HOME = '/tmp/rustup'
+  }
+  return base
+}
+
+async function readCommandText(result: { stdout?: () => Promise<string>; stderr?: () => Promise<string> }) {
+  const [stdout, stderr] = await Promise.all([
+    typeof result.stdout === 'function' ? result.stdout().catch(() => '') : Promise.resolve(''),
+    typeof result.stderr === 'function' ? result.stderr().catch(() => '') : Promise.resolve(''),
+  ])
+  return { stdout, stderr }
 }
 
 async function ensureToolchain(
   sandbox: Awaited<ReturnType<typeof Sandbox.create>>,
   plan: ReturnType<typeof getRuntimePlan>,
   signal: AbortSignal,
+  output: OutputCapture,
 ) {
   if (!plan.installPackages.length) return
 
   const check = await sandbox.runCommand({
     cmd: 'bash',
     args: ['-lc', `command -v ${plan.check}`],
+    cwd: SANDBOX_DIRECTORY,
     timeoutMs: 10_000,
     signal,
   })
@@ -93,12 +119,18 @@ async function ensureToolchain(
   const packages = plan.installPackages.join(' ')
   const install = await sandbox.runCommand({
     cmd: 'bash',
-    args: ['-lc', `DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ${packages}`],
+    args: ['-lc', `set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq --no-install-recommends ${packages}`],
+    cwd: SANDBOX_DIRECTORY,
     sudo: true,
     timeoutMs: MAX_TOOLCHAIN_INSTALL_TIME_MS,
     signal,
   })
-  if (install.exitCode !== 0) throw new Error('No se pudo preparar el runtime del lenguaje seleccionado.')
+  if (install.exitCode !== 0) {
+    const text = await readCommandText(install)
+    if (text.stdout.trim()) output.append('stdout', text.stdout)
+    if (text.stderr.trim()) output.append('stderr', text.stderr)
+    throw new Error(`No se pudo preparar el runtime del lenguaje seleccionado${packages ? ` (${packages})` : ''}.`)
+  }
 }
 
 async function runStep(
@@ -107,6 +139,7 @@ async function runStep(
   timeoutMs: number,
   signal: AbortSignal,
   output: OutputCapture,
+  env: Record<string, string>,
 ) {
   let timedOut = false
   let startedAt = 0
@@ -117,6 +150,7 @@ async function runStep(
       cmd: step.cmd,
       args: step.args,
       cwd: SANDBOX_DIRECTORY,
+      env,
       timeoutMs,
       signal,
       stdout: output.createStream('stdout'),
@@ -141,6 +175,10 @@ async function runStep(
   }
 }
 
+function isAbortError(error: unknown, signal: AbortSignal) {
+  return signal.aborted || (error instanceof Error && (error.name === 'AbortError' || /aborted|abort/i.test(error.message)))
+}
+
 export async function executeInSandbox(language: Language, code: string, signal: AbortSignal): Promise<SandboxExecutionResult> {
   let sandbox: Awaited<ReturnType<typeof Sandbox.create>> | undefined
   let timedOut = false
@@ -148,20 +186,19 @@ export async function executeInSandbox(language: Language, code: string, signal:
   let exitCode = 0
   const output = new OutputCapture()
   const plan = getRuntimePlan(language, code)
+  const env = runtimeEnv(language)
 
   try {
     sandbox = await Sandbox.create({
-      image: 'vercel/sandbox/universal:latest',
       timeout: SANDBOX_TIMEOUT_MS,
-      persistent: false,
       resources: { vcpus: 1 },
       networkPolicy: plan.installPackages.length ? TOOLCHAIN_NETWORK_POLICY : 'deny-all',
       signal,
-    })
+    } as Parameters<typeof Sandbox.create>[0])
 
     if (plan.installPackages.length) {
-      await ensureToolchain(sandbox, plan, signal)
-      await sandbox.update({ networkPolicy: 'deny-all' }, { signal })
+      await ensureToolchain(sandbox, plan, signal, output)
+      await sandbox.update({ networkPolicy: 'deny-all' } as never, { signal } as never).catch(() => undefined)
     }
 
     await sandbox.writeFiles([{ path: `${SANDBOX_DIRECTORY}/${plan.filename}`, content: code }], { signal })
@@ -174,6 +211,7 @@ export async function executeInSandbox(language: Language, code: string, signal:
         step.phase === 'compile' ? MAX_COMPILE_TIME_MS : MAX_EXECUTION_TIME_MS,
         signal,
         output,
+        env,
       )
       durationMs += result.durationMs
       exitCode = result.exitCode
@@ -188,7 +226,20 @@ export async function executeInSandbox(language: Language, code: string, signal:
       timedOut,
       outputTruncated: output.truncated,
     }
+  } catch (error) {
+    if (isAbortError(error, signal)) throw error
+    const message = error instanceof Error ? error.message : 'No se pudo ejecutar el código.'
+    if (!output.output.some((item) => item.stream === 'stderr' && item.text.includes(message))) {
+      output.append('stderr', `${message}\n`)
+    }
+    return {
+      output: output.output,
+      exitCode: exitCode || 1,
+      durationMs,
+      timedOut,
+      outputTruncated: output.truncated,
+    }
   } finally {
-    if (sandbox) await sandbox.delete().catch(() => undefined)
+    if (sandbox) await sandbox.stop().catch(() => sandbox?.delete?.().catch(() => undefined))
   }
 }
