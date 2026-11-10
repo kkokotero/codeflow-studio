@@ -2,8 +2,12 @@
 
 import { useState } from 'react'
 import {
-  Blocks, Bug, Check, Code2, Compass, Flame, GitBranch, Hammer, Languages,
-  LockKeyhole, MessageCircleCode, Play, Repeat2, Sparkles, Trophy, WandSparkles,
+  Binary, Blocks, Boxes, Braces, Bug, CalendarDays, Check, Code2, Compass, Crown,
+  Divide, Download, FilePlus2, Flame, FolderOpen, Gauge, GitBranch, GitCommitHorizontal,
+  Hammer, Hash, History, Infinity, Languages, Layers, Lightbulb, ListChecks,
+  LockKeyhole, MessageCircleCode, Network, Play, Puzzle, Repeat2, Route, Rows3,
+  Ruler, ScanSearch, Sigma, Sparkles, Terminal, Timer, Trash2, Trophy, Upload,
+  WandSparkles, Workflow, Wrench, Zap,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -12,8 +16,11 @@ import {
 } from '@/lib/achievements'
 
 const icons: Record<string, LucideIcon> = {
-  Blocks, Bug, Code2, Compass, Flame, GitBranch, Hammer, Languages, MessageCircleCode,
-  Play, Repeat2, Trophy, WandSparkles,
+  Binary, Blocks, Boxes, Braces, Bug, CalendarDays, Code2, Compass, Crown, Divide,
+  Download, FilePlus2, Flame, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, Hammer,
+  Hash, History, Infinity, Languages, Layers, Lightbulb, ListChecks, MessageCircleCode,
+  Network, Play, Puzzle, Repeat2, Route, Rows3, Ruler, ScanSearch, Sigma, Sparkles,
+  Terminal, Timer, Trash2, Trophy, Upload, WandSparkles, Workflow, Wrench, Zap,
 }
 
 const filters: Array<'Todos' | AchievementCategory> = ['Todos', ...ACHIEVEMENT_CATEGORIES]

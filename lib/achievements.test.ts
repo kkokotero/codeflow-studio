@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { createAchievementProfile, getLevelProgress, recordAchievementActivity } from './achievements'
+import { ACHIEVEMENTS, createAchievementProfile, getLevelProgress, recordAchievementActivity } from './achievements'
+
+describe('achievement catalog', () => {
+  it('ships at least one hundred achievements with unique ids', () => {
+    expect(ACHIEVEMENTS.length).toBeGreaterThanOrEqual(100)
+    expect(new Set(ACHIEVEMENTS.map((achievement) => achievement.id)).size).toBe(ACHIEVEMENTS.length)
+  })
+
+  it('does not unlock anything for a brand new profile', () => {
+    const profile = createAchievementProfile('Ada', 'ada')
+    expect(ACHIEVEMENTS.filter((achievement) => achievement.isComplete(profile.stats))).toEqual([])
+  })
+})
 
 describe('achievement progression', () => {
   it('awards the first-line achievement once, even when more edits are recorded', () => {

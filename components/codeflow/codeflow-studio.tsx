@@ -15,7 +15,7 @@ import { FlowCanvas } from '@/components/codeflow/flow-canvas'
 import { ColorThemeControls, useMaterialTheme } from '@/components/codeflow/color-theme-controls'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { AchievementsView } from '@/components/codeflow/achievements-view'
-import { ACHIEVEMENTS, createAchievementProfile, isAchievementProfile, recordAchievementActivity, type AchievementActivity, type AchievementDefinition } from '@/lib/achievements'
+import { ACHIEVEMENTS, createAchievementProfile, isAchievementProfile, migrateAchievementProfile, recordAchievementActivity, type AchievementActivity, type AchievementDefinition } from '@/lib/achievements'
 import { analyzeCode } from '@/lib/diagram'
 import { starterFiles } from '@/lib/codeflow-examples'
 import { SUPPORTED_LANGUAGES, LANGUAGE_DEFINITIONS, acceptedFileExtensions, getLanguageDefinition, isLanguage, languageFromFileName } from '@/lib/languages'
@@ -116,7 +116,7 @@ export function CodeflowStudio() {
       if (saved) {
         const parsed: unknown = JSON.parse(saved)
         if (parsed && typeof parsed === 'object' && 'version' in parsed && parsed.version === 1 && 'profiles' in parsed && Array.isArray(parsed.profiles)) {
-          restoredProfiles = parsed.profiles.filter(isAchievementProfile)
+          restoredProfiles = parsed.profiles.filter(isAchievementProfile).map(migrateAchievementProfile)
           if ('activeProfileId' in parsed && typeof parsed.activeProfileId === 'string') restoredActiveId = parsed.activeProfileId
         }
       }
@@ -205,12 +205,8 @@ export function CodeflowStudio() {
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
     setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, code } : file))
-    if (activeProfile && code.trim() && (!activeProfile.stats.hasWrittenCode
-      || (activeProfile.stats.hadFailedRun && !activeProfile.stats.editedAfterFailure)
-      || (activeProfile.stats.successfulRuns > 0 && !activeProfile.stats.hasRefinedProgram))) {
-      recordProgress({ type: 'edit', code })
-    }
-  }, [activeFileId, activeProfile, recordProgress])
+    recordProgress({ type: 'edit', code })
+  }, [activeFileId, recordProgress])
 
   const openLine = useCallback((nodeId: string) => {
     const node = graph.nodes.find((item) => item.id === nodeId)
@@ -325,6 +321,7 @@ export function CodeflowStudio() {
           output: output.filter((entry) => entry.stream === 'stdout').map((entry) => entry.text).join('\n'),
           nodeCount: executionGraph.nodes.length,
           nodeKinds: executionGraph.nodes.map((node) => node.data.kind),
+          code: activeFile.code,
         })
       }
       if (result.timedOut) setNotice(`Tiempo límite alcanzado · ${MAX_EXECUTION_TIME_MS / 1_000} s · proceso detenido.`)
@@ -449,9 +446,7 @@ export function CodeflowStudio() {
       setActiveStep(-1)
       setStatus('idle')
       setNotice(`${imported.length} archivo${imported.length === 1 ? '' : 's'} importado${imported.length === 1 ? '' : 's'}.`)
-      recordProgress({ type: 'explore', feature: 'file' })
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'No se pudieron leer los archivos seleccionados.')
+      recordProgress({ type: 'explore', feature: 'import' })
     } finally {
       setIsImporting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -467,7 +462,8 @@ export function CodeflowStudio() {
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     setNotice(`Se exportó ${link.download}.`)
-  }, [displayCode, displayFileName])
+    recordProgress({ type: 'export', target: 'file' })
+  }, [displayCode, displayFileName, recordProgress])
 
   const applySourceEdit = useCallback(() => {
     if (!selectedNode || historicalView) return
@@ -480,8 +476,9 @@ export function CodeflowStudio() {
     lines[index] = sourceEdit
     updateActiveCode(lines.join('\n'))
     setSourceLineOriginal(sourceEdit)
+    recordProgress({ type: 'apply-edit' })
     setNotice(`Línea ${selectedNode.data.line} sincronizada con el diagrama.`)
-  }, [activeFile.code, historicalView, selectedNode, sourceEdit, sourceLineOriginal, updateActiveCode])
+  }, [activeFile.code, historicalView, recordProgress, selectedNode, sourceEdit, sourceLineOriginal, updateActiveCode])
 
   const exportProject = useCallback(() => {
     const bundle = { format: 'codeflow-project', version: 1, name: 'algoritmos-visuales', files: files.map(({ name, language, code }) => ({ name, language, code })) }
@@ -493,7 +490,8 @@ export function CodeflowStudio() {
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     setNotice(`${files.length} archivos exportados como proyecto CodeFlow.`)
-  }, [files])
+    recordProgress({ type: 'export', target: 'project' })
+  }, [files, recordProgress])
 
   const exportDiagram = useCallback(() => {
     const diagram = { format: 'codeflow-diagram', version: 1, file: displayFileName, language: displayLanguage, nodes: graph.nodes.map(({ id, position, data }) => ({ id, position, ...data })), edges: [...graph.edges, ...manualEdges] }
@@ -505,11 +503,13 @@ export function CodeflowStudio() {
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     setNotice(`Diagrama de ${displayFileName} exportado como JSON.`)
-  }, [displayFileName, displayLanguage, graph, manualEdges])
+    recordProgress({ type: 'export', target: 'diagram' })
+  }, [displayFileName, displayLanguage, graph, manualEdges, recordProgress])
 
   const clearConsole = useCallback(() => {
     setLogs([])
-  }, [])
+    recordProgress({ type: 'clear-console' })
+  }, [recordProgress])
 
   const toggleSnapshotSelection = useCallback((id: string) => {
     setSelectedSnapshots((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id])
@@ -524,8 +524,9 @@ export function CodeflowStudio() {
     setIsPlaying(false)
     setStatus('paused')
     setInspectorTab('variables')
+    recordProgress({ type: 'snapshot' })
     setNotice(`Vista de historial · ${new Date(snapshot.createdAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`)
-  }, [files])
+  }, [files, recordProgress])
 
   const filteredFiles = files.filter((file) => file.name.toLowerCase().includes(fileFilter.toLowerCase()))
 
@@ -548,7 +549,7 @@ export function CodeflowStudio() {
         </div>
         <button className={`achievement-nav ${achievementsOpen ? 'is-active' : ''}`} type="button" aria-pressed={achievementsOpen} onClick={() => setAchievementsOpen((open) => !open)}><Trophy aria-hidden="true" /><span>{achievementsOpen ? 'Editor' : 'Logros'}</span>{activeProfile && <small>{Object.keys(activeProfile.unlocked).length}</small>}</button>
         <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
-        <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => setShowHelp(true)}><Keyboard aria-hidden="true" /></Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}><Keyboard aria-hidden="true" /></Button>
         <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
       </header>
 
@@ -607,7 +608,7 @@ export function CodeflowStudio() {
         <section className={`editor-pane workspace-panel ${mobilePane === 'editor' ? 'mobile-active' : ''}`} aria-label="Editor de código">
           <div className="panel-titlebar">
             <div className="panel-title"><Code2 aria-hidden="true" /><span>CÓDIGO</span><span className="panel-title__muted">·</span><span className="panel-title__file">{displayFileName.split('/').at(-1)}</span>{historicalView && <span className="history-mode-tag">SNAPSHOT · SOLO LECTURA</span>}</div>
-            <div className="editor-actions"><span className="editor-language-tag">{getLanguageDefinition(displayLanguage).label}</span>{historicalView ? <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button> : <Button variant="ghost" size="icon-xs" aria-label="Restablecer ejemplo" title="Restablecer archivo actual" onClick={() => { const original = starterFiles.find((file) => file.id === activeFile.id); if (original) updateActiveCode(original.code); else updateActiveCode('') }}><RotateCcw aria-hidden="true" /></Button>}</div>
+            <div className="editor-actions"><span className="editor-language-tag">{getLanguageDefinition(displayLanguage).label}</span>{historicalView ? <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button> : <Button variant="ghost" size="icon-xs" aria-label="Restablecer ejemplo" title="Restablecer archivo actual" onClick={() => { recordProgress({ type: 'reset' }); const original = starterFiles.find((file) => file.id === activeFile.id); if (original) updateActiveCode(original.code); else updateActiveCode('') }}><RotateCcw aria-hidden="true" /></Button>}</div>
           </div>
           <div className="editor-wrap">
             <CodeEditor
@@ -638,9 +639,9 @@ export function CodeflowStudio() {
         <aside className={`inspector-pane workspace-panel ${mobilePane === 'inspector' ? 'mobile-active' : ''}`} aria-label="Inspector">
           <div className="panel-titlebar"><div className="panel-title"><PanelRight aria-hidden="true" /><span>INSPECTOR</span></div><Button variant="ghost" size="icon-xs" aria-label="Limpiar filtro" title="Limpiar filtro" onClick={() => setVariableQuery('')}><X aria-hidden="true" /></Button></div>
           <div className="inspector-tabs" role="tablist" aria-label="Panel del inspector">
-            <button role="tab" aria-selected={inspectorTab === 'variables'} className={inspectorTab === 'variables' ? 'is-active' : ''} onClick={() => setInspectorTab('variables')}><Variable aria-hidden="true" /><span>Estado</span></button>
-            <button role="tab" aria-selected={inspectorTab === 'stack'} className={inspectorTab === 'stack' ? 'is-active' : ''} onClick={() => setInspectorTab('stack')}><ListTree aria-hidden="true" /><span>Pila</span></button>
-            <button role="tab" aria-selected={inspectorTab === 'history'} className={inspectorTab === 'history' ? 'is-active' : ''} onClick={() => setInspectorTab('history')}><History aria-hidden="true" /><span>Historial</span></button>
+            <button role="tab" aria-selected={inspectorTab === 'variables'} className={inspectorTab === 'variables' ? 'is-active' : ''} onClick={() => { setInspectorTab('variables'); recordProgress({ type: 'inspector', tab: 'variables' }) }}><Variable aria-hidden="true" /><span>Estado</span></button>
+            <button role="tab" aria-selected={inspectorTab === 'stack'} className={inspectorTab === 'stack' ? 'is-active' : ''} onClick={() => { setInspectorTab('stack'); recordProgress({ type: 'inspector', tab: 'stack' }) }}><ListTree aria-hidden="true" /><span>Pila</span></button>
+            <button role="tab" aria-selected={inspectorTab === 'history'} className={inspectorTab === 'history' ? 'is-active' : ''} onClick={() => { setInspectorTab('history'); recordProgress({ type: 'inspector', tab: 'history' }) }}><History aria-hidden="true" /><span>Historial</span></button>
           </div>
           <div className="inspector-content">
             {inspectorTab === 'variables' && <>
