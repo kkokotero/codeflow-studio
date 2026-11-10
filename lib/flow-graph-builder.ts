@@ -1,3 +1,4 @@
+import dagre from '@dagrejs/dagre'
 import type { DiagramGraph, FlowCardData, FlowCardEdge, FlowCardNode, FlowEdgeRole, FlowShape, NodeKind } from '@/lib/codeflow-types'
 
 export const MAX_SOURCE_CHARACTERS = 50_000
@@ -75,10 +76,10 @@ export class DiagramComplexityError extends Error {
 export class FlowGraphBuilder {
   readonly nodes: FlowCardNode[] = []
   readonly edges: FlowCardEdge[] = []
-  private readonly rowsByDepth = new Map<number, number>()
   private nextNodeId = 0
   private nextEdgeId = 0
   private nextConnectorId = 0
+  private readonly branchCountsBySource = new Map<string, number>()
 
   addNode(input: FlowNodeInput, depth = 0): string {
     if (depth > MAX_DIAGRAM_DEPTH) {
@@ -88,16 +89,9 @@ export class FlowGraphBuilder {
       throw new DiagramComplexityError(`El diagrama supera el límite de ${MAX_DIAGRAM_NODES} elementos. No se generó una vista parcial para evitar ocultar lógica.`)
     }
 
-    const row = this.rowsByDepth.get(depth) ?? 0
-    this.rowsByDepth.set(depth, row + 1)
     const id = `node-${this.nextNodeId++}`
     const data: FlowCardData = { ...input, shape: input.shape ?? defaultShape(input.kind), active: false }
-    this.nodes.push({
-      id,
-      type: 'flowCard',
-      position: { x: 72 + depth * 232, y: 58 + row * 112 },
-      data,
-    })
+    this.nodes.push({ id, type: 'flowCard', position: { x: 0, y: 0 }, data })
     return id
   }
 
@@ -109,23 +103,117 @@ export class FlowGraphBuilder {
 
   addEdge(source: string | null | undefined, target: string | null | undefined, label: string, role: FlowEdgeRole = 'control'): void {
     if (!source || !target || source === target) return
+
+    const sourceNode = this.nodes.find((node) => node.id === source)
+    let sourceHandle: string | undefined
+    if (sourceNode?.data.kind === 'condition') {
+      if (role === 'true') sourceHandle = 'source-left'
+      if (role === 'false') sourceHandle = 'source-right'
+      if (role === 'case') {
+        const branchIndex = this.branchCountsBySource.get(source) ?? 0
+        sourceHandle = branchIndex % 2 === 0 ? 'source-left' : 'source-right'
+        this.branchCountsBySource.set(source, branchIndex + 1)
+      }
+    } else if (sourceNode?.data.kind === 'loop' && role === 'false') {
+      sourceHandle = 'source-right'
+    }
+
     this.edges.push({
       id: `edge-${this.nextEdgeId++}`,
       source,
       target,
-      label,
-      type: 'smoothstep',
+      ...(sourceHandle ? { sourceHandle } : {}),
+      type: role === 'repeat' ? 'flowLoop' : 'smoothstep',
       data: { role },
       style: {
         stroke: edgeColors[role],
         strokeWidth: role === 'data' || role === 'operand' ? 1.5 : 1.7,
         ...(role === 'repeat' || role === 'unreachable' ? { strokeDasharray: role === 'repeat' ? '5 4' : '2 4' } : {}),
       },
+      markerEnd: { type: 'arrowclosed', color: edgeColors[role] },
+      label,
       labelStyle: { fill: edgeColors[role], fontSize: 10 },
+      labelBgStyle: { fill: '#121a18', fillOpacity: 0.96, stroke: 'none' },
+      labelBgPadding: [4, 3],
+      labelBgBorderRadius: 3,
     })
   }
 
   toGraph(): DiagramGraph {
-    return { nodes: this.nodes, edges: this.edges }
+    if (!this.nodes.length) return { nodes: [], edges: [] }
+
+    const layout = new dagre.graphlib.Graph({ multigraph: true })
+    layout.setGraph({
+      rankdir: 'TB',
+      ranker: 'network-simplex',
+      acyclicer: 'greedy',
+      nodesep: 42,
+      ranksep: 58,
+      edgesep: 18,
+      marginx: 42,
+      marginy: 42,
+    })
+    layout.setDefaultEdgeLabel(() => ({}))
+
+    const dimensions = new Map<string, { width: number; height: number }>()
+    for (const node of this.nodes) {
+      const shape = node.data.shape
+      const width = shape === 'connector' ? 62 : shape === 'terminator' ? 190 : shape === 'decision' || shape === 'input-output' ? 220 : 196
+      const height = shape === 'connector' ? 62 : shape === 'decision' ? 140 : shape === 'terminator' ? 86 : shape === 'input-output' ? 92 : node.data.expression ? 110 : 98
+      dimensions.set(node.id, { width, height })
+      layout.setNode(node.id, { width, height })
+    }
+
+    const edgeWeight: Record<FlowEdgeRole, number> = {
+      control: 7,
+      body: 5,
+      true: 4,
+      false: 4,
+      exit: 3,
+      merge: 3,
+      case: 2,
+      exception: 2,
+      repeat: 0.5,
+      data: 1,
+      operand: 1,
+      unreachable: 0.5,
+    }
+
+    for (const edge of this.edges) {
+      const role = edge.data?.role ?? 'control'
+      layout.setEdge(edge.source, edge.target, { weight: edgeWeight[role] }, edge.id)
+    }
+
+    dagre.layout(layout)
+
+    const laidOutNodes = this.nodes.map((node) => {
+      const size = dimensions.get(node.id)!
+      const position = layout.node(node.id)
+      return {
+        ...node,
+        position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
+      }
+    })
+
+    const minX = Math.min(...laidOutNodes.map((node) => node.position.x))
+    const maxX = Math.max(...laidOutNodes.map((node) => node.position.x + dimensions.get(node.id)!.width))
+    const loops = this.nodes.filter((node) => node.data.kind === 'loop')
+    const sideByLoop = new Map(loops.map((node, index) => [node.id, index % 2 === 0 ? 'left' : 'right'] as const))
+    const laneCountBySide = new Map<'left' | 'right', number>([['left', 0], ['right', 0]])
+    const laidOutEdges = this.edges.map((edge) => {
+      if (edge.data?.role !== 'repeat') return edge
+      const side = sideByLoop.get(edge.target) ?? 'left'
+      const lane = laneCountBySide.get(side) ?? 0
+      laneCountBySide.set(side, lane + 1)
+      const routeX = side === 'left' ? minX - 24 - lane * 16 : maxX + 24 + lane * 16
+      return {
+        ...edge,
+        sourceHandle: side === 'left' ? 'source-left' : 'source-right',
+        targetHandle: side === 'left' ? 'target-left' : 'target-right',
+        data: { ...edge.data, routeX },
+      }
+    })
+
+    return { nodes: laidOutNodes, edges: laidOutEdges }
   }
 }

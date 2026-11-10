@@ -309,6 +309,8 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
   .run-button:hover { background: color-mix(in srgb, var(--primary) 88%, white) !important; }
   .run-button:disabled, .run-button:disabled:hover { border-color: var(--line) !important; color: var(--muted-foreground) !important; background: var(--panel-raised) !important; box-shadow: none !important; cursor: not-allowed; opacity: 1; }
   .run-button kbd { margin-left: 5px; padding: 1px 4px; border: 1px solid #92c86a; border-radius: 3px; color: #345023; font-size: 9px; line-height: 14px; }
+  .run-button--busy { border-color: #69423f !important; color: #ffc0b7 !important; background: #442b29 !important; }
+  .run-button--busy:hover { background: #573431 !important; }
 .stop-button { color: #e4a6a0 !important; border-color: #57403e !important; }
 
 .workspace { display: grid; grid-template-columns: 188px minmax(300px, 1.03fr) minmax(320px, 1fr) 240px; min-width: 0; min-height: 0; background: var(--background); }
@@ -374,9 +376,12 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
 .react-flow__controls-button:hover { background: #26322e !important; }
 .react-flow__controls-button:last-child { border-bottom: 0 !important; }
 .react-flow__minimap { border: 1px solid #34403b !important; border-radius: 6px; background: #121a18 !important; }
-.react-flow__handle { width: 6px !important; height: 6px !important; border: 1px solid #89978d !important; background: #29342e !important; }
-.react-flow__edge-path { stroke-width: 1.25; }
-.react-flow__edge-text { fill: #96a49a !important; }
+  .react-flow__handle { width: 6px !important; height: 6px !important; border: 1px solid #89978d !important; background: #29342e !important; }
+  .react-flow__handle.flow-handle--route { width: 7px !important; height: 7px !important; opacity: 0; }
+  .flow-node:hover .react-flow__handle.flow-handle--route, .flow-node.is-selected .react-flow__handle.flow-handle--route { opacity: .8; }
+  .react-flow__edge-path { stroke-width: 1.25; }
+  .react-flow__edge-text { fill: #96a49a !important; }
+  .flow-loop-edge-label { z-index: 4; padding: 2px 5px; border: 1px solid #3c3a4b; border-radius: 4px; background: #121a18; font: 8px/1.35 Geist Mono, ui-monospace, monospace; white-space: nowrap; pointer-events: none; }
 .react-flow__attribution { padding: 2px 4px !important; border: 1px solid #2b3430; border-radius: 4px 0 0 0; color: #829087 !important; background: #111815d9 !important; font-size: 8px !important; }
  .flow-node { position: relative; width: 196px; min-height: 76px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; transition: transform 130ms ease; }
  .flow-node__shape { position: absolute; inset: 0; border: 1px solid #3a4640; border-radius: 5px; background: linear-gradient(145deg, #1c2422, #141a1b); box-shadow: 0 6px 18px #0004; transition: border-color 130ms ease, box-shadow 130ms ease; }
@@ -510,7 +515,10 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
 .diff-row > span { overflow: hidden; color: #b4c1b6; font: 8px Geist Mono, ui-monospace, monospace; text-overflow: ellipsis; }
 .diff-row code { overflow: hidden; color: #d6b982; font: 8px Geist Mono, ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .diff-row svg { width: 10px; height: 10px; color: #68776b; }
-.comparison-empty { color: #839181; font-size: 8px; line-height: 1.5; }
+  .comparison-empty { color: #839181; font-size: 8px; line-height: 1.5; }
+  .execution-output-comparison { display: grid; grid-template-columns: minmax(0, 1fr) 12px minmax(0, 1fr); align-items: start; gap: 5px; }
+  .execution-output-comparison > pre { min-width: 0; max-height: 110px; overflow: auto; margin: 0; padding: 5px; border: 1px solid #29332d; border-radius: 4px; color: #b8c6b9; background: #101512; font: 8px/1.5 Geist Mono, ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .execution-output-comparison > svg { width: 12px; height: 12px; margin-top: 7px; color: #788477; }
 .node-inspector { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 10px; border-top: 1px solid #344137; background: #151d17; }
 .node-inspector__title { display: flex; justify-content: space-between; color: #a9c38f; font-size: 8px; font-weight: 650; letter-spacing: 0.08em; }
 .node-inspector__title button { display: grid; place-items: center; border: 0; color: #81917d; background: transparent; }
@@ -543,9 +551,10 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
 .console-prompt { color: #9ecb7d; }
 .console-line--error { color: #ee9990; }
 .console-line--error .console-prompt { color: #e88077; }
-.console-empty { display: flex; align-items: center; gap: 5px; height: 100%; color: #697670; font-size: 9px; }
-.console-empty > span { color: #a6c38c; }
-.console-empty code { color: #aab8a8; font-size: 9px; }
+  .console-empty { display: flex; align-items: center; gap: 5px; height: 100%; color: #697670; font-size: 9px; }
+  .console-empty > span { color: #a6c38c; }
+  .console-empty code { color: #aab8a8; font-size: 9px; }
+  .console-empty kbd { padding: 1px 4px; border: 1px solid #354138; border-radius: 3px; color: #b4c5b5; background: #1a221d; font: 8px Geist Mono, ui-monospace, monospace; }
 .trace-body { position: relative; display: flex; flex: 1; flex-direction: column; justify-content: center; min-height: 0; padding: 9px 14px 10px; }
 .trace-scrubber { width: 100%; height: 12px; margin: 0; appearance: none; background: transparent; cursor: pointer; }
 .trace-scrubber:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 999px; }
@@ -571,7 +580,8 @@ html[data-color-scheme='light'] .codeflow-shell .file-row.is-active {
 .statusbar-dot--error { background: #e7847b; box-shadow: none; }
 .statusbar-dot--paused { background: #b698e5; box-shadow: none; }
 .statusbar-dot--loading { background: #e9bd6e; box-shadow: none; }
-.statusbar-dot--stopped { background: #7d8882; box-shadow: none; }
+  .statusbar-dot--stopped { background: #7d8882; box-shadow: none; }
+  .statusbar-dot--complete { background: #91c983; box-shadow: 0 0 7px rgb(145 201 131 / 45%); }
 .statusbar-right { margin-left: auto; color: #a5b0a9; }
 .statusbar-right span { color: #64726a; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
