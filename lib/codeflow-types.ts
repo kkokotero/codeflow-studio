@@ -42,7 +42,13 @@ export interface FlowCardData extends Record<string, unknown> {
 }
 
 export type FlowCardNode = Node<FlowCardData, 'flowCard'>
-export type FlowCardEdge = Edge<{ role?: FlowEdgeRole; routeX?: number }>
+export type FlowCardEdge = Edge<{
+  role?: FlowEdgeRole
+  routeX?: number
+  routePoints?: Array<{ x: number; y: number }>
+  preferredSourceSide?: 'top' | 'right' | 'bottom' | 'left'
+  preferredTargetSide?: 'top' | 'right' | 'bottom' | 'left'
+}>
 
 export interface DiagramGraph {
   nodes: FlowCardNode[]

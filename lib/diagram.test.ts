@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeCode } from './diagram'
+import { getFlowNodeSize, routeFlowEdges } from './flow-routing'
+import type { FlowCardEdge, FlowCardNode } from './codeflow-types'
 
 const nodesOfKind = (graph: ReturnType<typeof analyzeCode>, kind: string) => graph.nodes.filter((node) => node.data.kind === kind)
 const edgesWithRole = (graph: ReturnType<typeof analyzeCode>, role: string) => graph.edges.filter((edge) => edge.data?.role === role)
@@ -50,10 +52,82 @@ describe('analyzeCode', () => {
     expect(graph.error).toBeUndefined()
     expect(nodesOfKind(graph, 'loop')).toHaveLength(1)
     expect(repeatEdges.length).toBeGreaterThan(0)
-    expect(repeatEdges.every((edge) => edge.type === 'flowLoop' && Number.isFinite(edge.data?.routeX))).toBe(true)
-    expect(repeatEdges.every((edge) => edge.targetHandle === 'target-left' || edge.targetHandle === 'target-right')).toBe(true)
+    expect(repeatEdges.every((edge) => edge.type === 'flowRouted' && (edge.data?.routePoints?.length ?? 0) >= 2)).toBe(true)
+    expect(repeatEdges.every((edge) => edge.sourceHandle?.startsWith('source-') && edge.targetHandle?.startsWith('target-'))).toBe(true)
     expect(edgesWithRole(graph, 'exit').length).toBeGreaterThan(0)
     expect(loop.position.y).toBeLessThan(Math.max(...graph.nodes.map((node) => node.position.y)))
+  })
+
+  it('routes nested loop returns around blocks and recalculates after movement', () => {
+    const graph = analyzeCode('for (let outer = 0; outer < 3; outer += 1) {\n  for (let inner = 0; inner < 4; inner += 1) {\n    if (inner === 1) continue\n    if (inner === 3) break\n    process(outer, inner)\n  }\n}', 'javascript')
+    const repeatEdges = edgesWithRole(graph, 'repeat')
+
+    expect(graph.error).toBeUndefined()
+    expect(nodesOfKind(graph, 'loop').length).toBeGreaterThanOrEqual(2)
+    expect(repeatEdges.length).toBeGreaterThanOrEqual(2)
+    expect(graph.edges.every((edge) => edge.type === 'flowRouted' && (edge.data?.routePoints?.length ?? 0) >= 2)).toBe(true)
+    for (const edge of graph.edges) {
+      const points = edge.data?.routePoints
+      expect(edge.type).toBe('flowRouted')
+      expect(points?.length ?? 0).toBeGreaterThanOrEqual(2)
+      for (let index = 1; index < (points?.length ?? 0); index += 1) {
+        const start = points![index - 1]
+        const end = points![index]
+        expect(start.x === end.x || start.y === end.y).toBe(true)
+        for (const obstacle of graph.nodes.filter((node) => node.id !== edge.source && node.id !== edge.target)) {
+          const size = getFlowNodeSize(obstacle)
+          const crosses = start.y === end.y
+            ? start.y > obstacle.position.y && start.y < obstacle.position.y + size.height && Math.max(Math.min(start.x, end.x), obstacle.position.x) < Math.min(Math.max(start.x, end.x), obstacle.position.x + size.width)
+            : start.x > obstacle.position.x && start.x < obstacle.position.x + size.width && Math.max(Math.min(start.y, end.y), obstacle.position.y) < Math.min(Math.max(start.y, end.y), obstacle.position.y + size.height)
+          expect(crosses, `edge ${edge.id} crosses ${obstacle.id}`).toBe(false)
+        }
+      }
+    }
+
+    const edgeToMove = repeatEdges[0]
+    const movedNodes = graph.nodes.map((node) => node.id === edgeToMove.source
+      ? { ...node, position: { x: node.position.x + 120, y: node.position.y + 40 } }
+      : node)
+    const reroutedEdges = routeFlowEdges(movedNodes, graph.edges)
+    const rerouted = reroutedEdges.find((edge) => edge.id === edgeToMove.id)
+    expect(rerouted?.data?.routePoints).not.toEqual(edgeToMove.data?.routePoints)
+  })
+
+  it('routes a simple pair of intersecting flows around each other', () => {
+    const makeNode = (id: string, x: number, y: number): FlowCardNode => ({
+      id,
+      type: 'flowCard',
+      position: { x, y },
+      data: { label: id, kind: 'statement', line: 1, detail: 'test', active: false, shape: 'process' },
+    })
+    const nodes = [makeNode('left', 0, 0), makeNode('right', 500, 0), makeNode('top', 250, -260), makeNode('bottom', 250, 260)]
+    const edges: FlowCardEdge[] = [
+      { id: 'horizontal', source: 'left', target: 'right', data: { role: 'control' } },
+      { id: 'vertical', source: 'top', target: 'bottom', data: { role: 'control' } },
+    ]
+    const routed = routeFlowEdges(nodes, edges)
+    const crossingEdge = routed[0].data?.routePoints ?? []
+    const otherEdge = routed[1].data?.routePoints ?? []
+
+    expect(routed.every((edge) => edge.type === 'flowRouted')).toBe(true)
+    let hasCrossing = false
+    for (let firstIndex = 1; firstIndex < crossingEdge.length; firstIndex += 1) {
+      const firstStart = crossingEdge[firstIndex - 1]
+      const firstEnd = crossingEdge[firstIndex]
+      for (let secondIndex = 1; secondIndex < otherEdge.length; secondIndex += 1) {
+        const secondStart = otherEdge[secondIndex - 1]
+        const secondEnd = otherEdge[secondIndex]
+        const horizontalStart = firstStart.y === firstEnd.y ? firstStart : secondStart
+        const horizontalEnd = firstStart.y === firstEnd.y ? firstEnd : secondEnd
+        const verticalStart = firstStart.x === firstEnd.x ? firstStart : secondStart
+        const verticalEnd = firstStart.x === firstEnd.x ? firstEnd : secondEnd
+        const perpendicular = (firstStart.y === firstEnd.y && secondStart.x === secondEnd.x)
+          || (secondStart.y === secondEnd.y && firstStart.x === firstEnd.x)
+        if (perpendicular && verticalStart.x > Math.min(horizontalStart.x, horizontalEnd.x) && verticalStart.x < Math.max(horizontalStart.x, horizontalEnd.x)
+          && horizontalStart.y > Math.min(verticalStart.y, verticalEnd.y) && horizontalStart.y < Math.max(verticalStart.y, verticalEnd.y)) hasCrossing = true
+      }
+    }
+    expect(hasCrossing).toBe(false)
   })
 
   it('creates an analyzable subflow for JavaScript arrow functions', () => {

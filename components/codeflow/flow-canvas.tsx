@@ -14,11 +14,37 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { FlowNode } from '@/components/codeflow/flow-node'
-import { FlowLoopEdge } from '@/components/codeflow/flow-loop-edge'
-import type { DiagramGraph, FlowCardData, FlowCardEdge } from '@/lib/codeflow-types'
+import { FlowRoutedEdge } from '@/components/codeflow/flow-routed-edge'
+import { routeFlowEdges } from '@/lib/flow-routing'
+import type { DiagramGraph, FlowCardData, FlowCardEdge, FlowCardNode } from '@/lib/codeflow-types'
 
 const nodeTypes = { flowCard: FlowNode }
-const edgeTypes = { flowLoop: FlowLoopEdge }
+const edgeTypes = { flowRouted: FlowRoutedEdge }
+
+function routesMatch(current: FlowCardEdge[], next: FlowCardEdge[]) {
+  return current.length === next.length && current.every((edge, index) => {
+    const candidate = next[index]
+    if (edge.id !== candidate?.id) return false
+    if (edge.type !== candidate.type
+      || edge.source !== candidate.source
+      || edge.target !== candidate.target
+      || edge.data?.role !== candidate.data?.role
+      || edge.label !== candidate.label
+      || edge.style?.stroke !== candidate.style?.stroke
+      || edge.style?.strokeDasharray !== candidate.style?.strokeDasharray
+      || edge.labelStyle?.fill !== candidate.labelStyle?.fill
+      || JSON.stringify(edge.markerEnd) !== JSON.stringify(candidate.markerEnd)) return false
+    const currentPoints = edge.data?.routePoints
+    const nextPoints = candidate.data?.routePoints
+    if (currentPoints === undefined || nextPoints === undefined) {
+      return currentPoints === nextPoints && edge.sourceHandle === candidate.sourceHandle && edge.targetHandle === candidate.targetHandle
+    }
+    return edge.sourceHandle === candidate.sourceHandle
+      && edge.targetHandle === candidate.targetHandle
+      && currentPoints.length === nextPoints.length
+      && currentPoints.every((point, pointIndex) => point.x === nextPoints[pointIndex]?.x && point.y === nextPoints[pointIndex]?.y)
+  })
+}
 
 function AutoFit({ nodeKey }: { nodeKey: string }) {
   const { fitView, getNodes } = useReactFlow()
@@ -60,7 +86,8 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
   ].join('::'), [graph.edges, graph.nodes])
   const previousLayoutKey = useRef(layoutKey)
   const [nodes, setNodes, onNodesChange] = useNodesState(activeNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState([...graph.edges, ...manualEdges])
+  const routedGraphEdges = useMemo(() => routeFlowEdges(nodes as FlowCardNode[], graph.edges), [graph.edges, nodes])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([...routedGraphEdges, ...manualEdges])
 
   useEffect(() => {
     const preserveDraggedPositions = previousLayoutKey.current === layoutKey
@@ -80,12 +107,17 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
     setEdges((current) => {
       const existingManual = current.filter((edge) => edge.id.startsWith('edge-user-') && validNodeIds.has(edge.source) && validNodeIds.has(edge.target))
       const manual = manualEdges.length ? manualEdges.filter((edge) => validNodeIds.has(edge.source) && validNodeIds.has(edge.target)) : existingManual
-      const next = [...graph.edges, ...manual]
-      const currentIds = current.map((edge) => edge.id)
-      const nextIds = next.map((edge) => edge.id)
-      return currentIds.length === nextIds.length && currentIds.every((id, index) => id === nextIds[index]) ? current : next
+        const manualForRouting = manual.map((edge) => ({
+          ...edge,
+          sourceHandle: undefined,
+          targetHandle: undefined,
+          data: { ...edge.data, preferredSourceSide: undefined, preferredTargetSide: undefined },
+        }))
+        const routedManualEdges = routeFlowEdges(nodes as FlowCardNode[], manualForRouting)
+        const next = [...routedGraphEdges, ...routedManualEdges]
+      return routesMatch(current, next) ? current : next
     })
-  }, [graph.edges, graph.nodes, manualEdges, setEdges])
+    }, [graph.nodes, manualEdges, nodes, routedGraphEdges, setEdges])
 
   useEffect(() => {
     onManualEdgesChange(edges.filter((edge) => edge.id.startsWith('edge-user-')))

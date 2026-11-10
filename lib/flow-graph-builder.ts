@@ -1,5 +1,6 @@
 import dagre from '@dagrejs/dagre'
 import type { DiagramGraph, FlowCardData, FlowCardEdge, FlowCardNode, FlowEdgeRole, FlowShape, NodeKind } from '@/lib/codeflow-types'
+import { routeFlowEdges } from '@/lib/flow-routing'
 
 export const MAX_SOURCE_CHARACTERS = 50_000
 export const MAX_DIAGRAM_NODES = 180
@@ -79,7 +80,6 @@ export class FlowGraphBuilder {
   private nextNodeId = 0
   private nextEdgeId = 0
   private nextConnectorId = 0
-  private readonly branchCountsBySource = new Map<string, number>()
 
   addNode(input: FlowNodeInput, depth = 0): string {
     if (depth > MAX_DIAGRAM_DEPTH) {
@@ -104,25 +104,10 @@ export class FlowGraphBuilder {
   addEdge(source: string | null | undefined, target: string | null | undefined, label: string, role: FlowEdgeRole = 'control'): void {
     if (!source || !target || source === target) return
 
-    const sourceNode = this.nodes.find((node) => node.id === source)
-    let sourceHandle: string | undefined
-    if (sourceNode?.data.kind === 'condition') {
-      if (role === 'true') sourceHandle = 'source-left'
-      if (role === 'false') sourceHandle = 'source-right'
-      if (role === 'case') {
-        const branchIndex = this.branchCountsBySource.get(source) ?? 0
-        sourceHandle = branchIndex % 2 === 0 ? 'source-left' : 'source-right'
-        this.branchCountsBySource.set(source, branchIndex + 1)
-      }
-    } else if (sourceNode?.data.kind === 'loop' && role === 'false') {
-      sourceHandle = 'source-right'
-    }
-
     this.edges.push({
       id: `edge-${this.nextEdgeId++}`,
       source,
       target,
-      ...(sourceHandle ? { sourceHandle } : {}),
       type: role === 'repeat' ? 'flowLoop' : 'smoothstep',
       data: { role },
       style: {
@@ -195,25 +180,6 @@ export class FlowGraphBuilder {
       }
     })
 
-    const minX = Math.min(...laidOutNodes.map((node) => node.position.x))
-    const maxX = Math.max(...laidOutNodes.map((node) => node.position.x + dimensions.get(node.id)!.width))
-    const loops = this.nodes.filter((node) => node.data.kind === 'loop')
-    const sideByLoop = new Map(loops.map((node, index) => [node.id, index % 2 === 0 ? 'left' : 'right'] as const))
-    const laneCountBySide = new Map<'left' | 'right', number>([['left', 0], ['right', 0]])
-    const laidOutEdges = this.edges.map((edge) => {
-      if (edge.data?.role !== 'repeat') return edge
-      const side = sideByLoop.get(edge.target) ?? 'left'
-      const lane = laneCountBySide.get(side) ?? 0
-      laneCountBySide.set(side, lane + 1)
-      const routeX = side === 'left' ? minX - 24 - lane * 16 : maxX + 24 + lane * 16
-      return {
-        ...edge,
-        sourceHandle: side === 'left' ? 'source-left' : 'source-right',
-        targetHandle: side === 'left' ? 'target-left' : 'target-right',
-        data: { ...edge.data, routeX },
-      }
-    })
-
-    return { nodes: laidOutNodes, edges: laidOutEdges }
+    return { nodes: laidOutNodes, edges: routeFlowEdges(laidOutNodes, this.edges) }
   }
 }
