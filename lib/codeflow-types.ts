@@ -46,6 +46,7 @@ export type FlowCardEdge = Edge<{
   role?: FlowEdgeRole
   routeX?: number
   routePoints?: Array<{ x: number; y: number }>
+  // Optional side pins. Auto-routing never writes these, so they only capture deliberate caller intent.
   preferredSourceSide?: 'top' | 'right' | 'bottom' | 'left'
   preferredTargetSide?: 'top' | 'right' | 'bottom' | 'left'
 }>

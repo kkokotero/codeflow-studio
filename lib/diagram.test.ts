@@ -266,4 +266,57 @@ describe('analyzeCode', () => {
       expect(result.error).toBeTruthy()
     }
   })
+
+  it('picks new connector sides when a node moves instead of locking the previous route', () => {
+    const makeNode = (id: string, x: number, y: number): FlowCardNode => ({
+      id,
+      type: 'flowCard',
+      position: { x, y },
+      data: { label: id, kind: 'statement', line: 1, detail: 'test', active: false, shape: 'process' },
+    })
+    const routeLength = (edge: FlowCardEdge) => {
+      const points = edge.data?.routePoints ?? []
+      return points.slice(1).reduce((total, point, index) => total
+        + Math.abs(point.x - points[index].x) + Math.abs(point.y - points[index].y), 0)
+    }
+
+    const edge: FlowCardEdge = { id: 'connector', source: 'source', target: 'target', data: { role: 'control' } }
+    const source = makeNode('source', 0, 0)
+    const below = routeFlowEdges([source, makeNode('target', 0, 320)], [edge])
+    expect(below[0].sourceHandle).toBe('source-bottom')
+    expect(below[0].targetHandle).toBe('target-top')
+
+    // Re-route using the previously routed edge, exactly like the canvas does while dragging.
+    const beside = routeFlowEdges([source, makeNode('target', 480, 0)], below)
+    expect(beside[0].sourceHandle).toBe('source-right')
+    expect(beside[0].targetHandle).toBe('target-left')
+    expect(beside[0].data?.preferredSourceSide).toBeUndefined()
+    expect(beside[0].data?.preferredTargetSide).toBeUndefined()
+    expect(routeLength(beside[0])).toBeLessThan(340)
+  })
+
+  it('keeps routing stable and local when a node is dragged around', () => {
+    const graph = analyzeCode('function sumTo(limit) {\n  let total = 0\n  for (let index = 1; index <= limit; index += 1) {\n    total += index\n  }\n  return total\n}', 'javascript')
+    const source = graph.nodes.find((node) => node.data.label === 'Inicio · sumTo()')!
+    const bodyEdge = graph.edges.find((edge) => edge.source === source.id && edge.data?.role === 'body')!
+    const originalLength = bodyEdge.data?.routePoints?.slice(1).reduce((total, point, index) => {
+      const previous = bodyEdge.data!.routePoints![index]
+      return total + Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y)
+    }, 0) ?? 0
+
+    for (const offset of [{ x: 150, y: 60 }, { x: -120, y: 40 }, { x: 0, y: 90 }]) {
+      const moved = graph.nodes.map((node) => node.id === source.id
+        ? { ...node, position: { x: node.position.x + offset.x, y: node.position.y + offset.y } }
+        : node)
+      const rerouted = routeFlowEdges(moved, graph.edges)
+      const movedEdge = rerouted.find((edge) => edge.id === bodyEdge.id)!
+      const movedLength = movedEdge.data?.routePoints?.slice(1).reduce((total, point, index) => {
+        const previous = movedEdge.data!.routePoints![index]
+        return total + Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y)
+      }, 0) ?? 0
+
+      expect(movedLength).toBeLessThan(originalLength + 260)
+      expect(routeFlowEdges(moved, rerouted).map((edge) => edge.data?.routePoints)).toEqual(rerouted.map((edge) => edge.data?.routePoints))
+    }
+  })
 })

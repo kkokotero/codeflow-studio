@@ -109,12 +109,6 @@ function sideHandle(side: Side, endpoint: 'source' | 'target') {
   return `${endpoint}-${side}`
 }
 
-function explicitSide(handle: string | null | undefined, endpoint: 'source' | 'target'): Side | null {
-  if (!handle?.startsWith(`${endpoint}-`)) return null
-  const side = handle.slice(endpoint.length + 1)
-  return side === 'top' || side === 'right' || side === 'bottom' || side === 'left' ? side : null
-}
-
 function makeEndpoints(node: FlowCardNode, toward: FlowRoutePoint, endpoint: 'source' | 'target', forcedSide: Side | null, clearance: number, preferredSide: Side | null = null): Endpoint[] {
   const { width, height } = getFlowNodeSize(node)
   const centerX = node.position.x + width / 2
@@ -155,12 +149,12 @@ function segmentPenalty(start: FlowRoutePoint, end: FlowRoutePoint, routes: Flow
         const crossing = { x: left.x, y: start.y }
         const isRouteEndpoint = (crossing.x === route[0].x && crossing.y === route[0].y)
           || (crossing.x === route.at(-1)?.x && crossing.y === route.at(-1)?.y)
-        if (!isRouteEndpoint && left.x >= Math.min(start.x, end.x) && left.x <= Math.max(start.x, end.x) && start.y >= Math.min(left.y, right.y) && start.y <= Math.max(left.y, right.y)) penalty += 1_000_000
+        if (!isRouteEndpoint && left.x >= Math.min(start.x, end.x) && left.x <= Math.max(start.x, end.x) && start.y >= Math.min(left.y, right.y) && start.y <= Math.max(left.y, right.y)) penalty += 900
       } else if (start.x === end.x && left.y === right.y) {
         const crossing = { x: start.x, y: left.y }
         const isRouteEndpoint = (crossing.x === route[0].x && crossing.y === route[0].y)
           || (crossing.x === route.at(-1)?.x && crossing.y === route.at(-1)?.y)
-        if (!isRouteEndpoint && left.y >= Math.min(start.y, end.y) && left.y <= Math.max(start.y, end.y) && start.x >= Math.min(left.x, right.x) && start.x <= Math.max(left.x, right.x)) penalty += 1_000_000
+        if (!isRouteEndpoint && left.y >= Math.min(start.y, end.y) && left.y <= Math.max(start.y, end.y) && start.x >= Math.min(left.x, right.x) && start.x <= Math.max(left.x, right.x)) penalty += 900
       }
     }
   }
@@ -180,8 +174,8 @@ function routeEdge(edge: FlowCardEdge, nodes: FlowCardNode[], obstacles: Rect[],
     && Math.abs(targetCenter.x - sourceCenter.x) >= getFlowNodeSize(source).width * 0.2
     ? targetCenter.x < sourceCenter.x ? 'left' : 'right'
     : null
-  const starts = makeEndpoints(source, targetCenter, 'source', edge.data?.preferredSourceSide ?? explicitSide(edge.sourceHandle, 'source'), clearance, branchSide)
-  const goals = makeEndpoints(target, sourceCenter, 'target', edge.data?.preferredTargetSide ?? explicitSide(edge.targetHandle, 'target'), clearance)
+  const starts = makeEndpoints(source, targetCenter, 'source', edge.data?.preferredSourceSide ?? null, clearance, branchSide)
+  const goals = makeEndpoints(target, sourceCenter, 'target', edge.data?.preferredTargetSide ?? null, clearance)
   const routeWindow = {
     left: Math.min(source.position.x, target.position.x) - 120,
     right: Math.max(source.position.x + getFlowNodeSize(source).width, target.position.x + getFlowNodeSize(target).width) + 120,
@@ -202,19 +196,24 @@ function routeEdge(edge: FlowCardEdge, nodes: FlowCardNode[], obstacles: Rect[],
       routeLaneCoordinates.y.push(start.y - 12, start.y + 12, end.y - 12, end.y + 12)
     }
   }
+  const windowObstacles = obstacles.filter((rect) => rect.right >= routeWindow.left
+    && rect.left <= routeWindow.right
+    && rect.bottom >= routeWindow.top
+    && rect.top <= routeWindow.bottom)
+  const withinWindow = (value: number, min: number, max: number) => value >= min && value <= max
   const xs = uniqueSorted([
     ...starts.map(({ stub }) => stub.x),
     ...goals.map(({ stub }) => stub.x),
-    ...routes.flatMap((route) => route.map(({ x }) => x)),
-    ...routeLaneCoordinates.x,
-    ...obstacles.flatMap((rect) => [rect.left, rect.right]),
+    ...routes.flatMap((route) => route.map(({ x }) => x)).filter((x) => withinWindow(x, routeWindow.left, routeWindow.right)),
+    ...routeLaneCoordinates.x.filter((x) => withinWindow(x, routeWindow.left, routeWindow.right)),
+    ...windowObstacles.flatMap((rect) => [rect.left, rect.right]),
   ])
   const ys = uniqueSorted([
     ...starts.map(({ stub }) => stub.y),
     ...goals.map(({ stub }) => stub.y),
-    ...routes.flatMap((route) => route.map(({ y }) => y)),
-    ...routeLaneCoordinates.y,
-    ...obstacles.flatMap((rect) => [rect.top, rect.bottom]),
+    ...routes.flatMap((route) => route.map(({ y }) => y)).filter((y) => withinWindow(y, routeWindow.top, routeWindow.bottom)),
+    ...routeLaneCoordinates.y.filter((y) => withinWindow(y, routeWindow.top, routeWindow.bottom)),
+    ...windowObstacles.flatMap((rect) => [rect.top, rect.bottom]),
   ])
   const xIndexes = new Map(xs.map((value, index) => [value, index]))
   const yIndexes = new Map(ys.map((value, index) => [value, index]))
@@ -316,6 +315,74 @@ function simplifyRoute(points: FlowRoutePoint[]) {
 
 const edgePriority: Record<string, number> = { repeat: -1, control: 0, false: 1, true: 2, case: 2, body: 3, exit: 3, merge: 3 }
 
+function fallbackEndpoint(node: FlowCardNode, toward: FlowCardNode, endpoint: 'source' | 'target'): Endpoint {
+  const { width, height } = getFlowNodeSize(node)
+  const target = getFlowNodeSize(toward)
+  const centerX = node.position.x + width / 2
+  const centerY = node.position.y + height / 2
+  const targetCenter = { x: toward.position.x + target.width / 2, y: toward.position.y + target.height / 2 }
+  const dx = targetCenter.x - centerX
+  const dy = targetCenter.y - centerY
+  const side: Side = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
+  return makeEndpoints(node, targetCenter, endpoint, side, 15)[0]
+}
+
+function fallbackRoutePoints(source: FlowCardNode, target: FlowCardNode): FlowRoutePoint[] {
+  const start = fallbackEndpoint(source, target, 'source')
+  const goal = fallbackEndpoint(target, source, 'target')
+  const sourceVertical = start.side === 'top' || start.side === 'bottom'
+  const targetVertical = goal.side === 'top' || goal.side === 'bottom'
+  if (sourceVertical && targetVertical) {
+    const midY = (start.stub.y + goal.stub.y) / 2
+    return simplifyRoute([
+      start.port,
+      start.stub,
+      { x: start.stub.x, y: midY },
+      { x: goal.stub.x, y: midY },
+      goal.stub,
+      goal.port,
+    ])
+  }
+  if (!sourceVertical && !targetVertical) {
+    const midX = (start.stub.x + goal.stub.x) / 2
+    return simplifyRoute([
+      start.port,
+      start.stub,
+      { x: midX, y: start.stub.y },
+      { x: midX, y: goal.stub.y },
+      goal.stub,
+      goal.port,
+    ])
+  }
+  return simplifyRoute([
+    start.port,
+    start.stub,
+    sourceVertical ? { x: start.stub.x, y: goal.stub.y } : { x: goal.stub.x, y: start.stub.y },
+    goal.stub,
+    goal.port,
+  ])
+}
+
+function buildRoutedEdge(edge: FlowCardEdge, routePoints: FlowRoutePoint[]): FlowCardEdge | null {
+  const sourcePort = routePoints[0]
+  const sourceStub = routePoints[1]
+  const targetStub = routePoints[routePoints.length - 2]
+  const targetPort = routePoints[routePoints.length - 1]
+  if (!sourcePort || !sourceStub || !targetStub || !targetPort) return null
+  const sourceSide = sourceStub.x < sourcePort.x ? 'left' : sourceStub.x > sourcePort.x ? 'right' : sourceStub.y < sourcePort.y ? 'top' : 'bottom'
+  const targetSide = targetStub.x < targetPort.x ? 'left' : targetStub.x > targetPort.x ? 'right' : targetStub.y < targetPort.y ? 'top' : 'bottom'
+  return {
+    ...edge,
+    type: 'flowRouted',
+    sourceHandle: sideHandle(sourceSide, 'source'),
+    targetHandle: sideHandle(targetSide, 'target'),
+    data: {
+      ...edge.data,
+      routePoints,
+    },
+  }
+}
+
 export function routeFlowEdges(nodes: FlowCardNode[], edges: FlowCardEdge[]): FlowCardEdge[] {
   const clearance = 8
   const obstacles = nodes.map((node) => {
@@ -333,34 +400,21 @@ export function routeFlowEdges(nodes: FlowCardNode[], edges: FlowCardEdge[]): Fl
   const orderedEdges = [...edges].sort((left, right) => (edgePriority[left.data?.role ?? ''] ?? 2) - (edgePriority[right.data?.role ?? ''] ?? 2))
 
   for (const edge of orderedEdges) {
+    const source = nodes.find((node) => node.id === edge.source)
+    const target = nodes.find((node) => node.id === edge.target)
     const routePoints = routeEdge(edge, nodes, obstacles, routes)
+      ?? (source && target ? fallbackRoutePoints(source, target) : null)
     if (!routePoints) {
       routed.set(edge.id, edge)
       continue
     }
-    const sourcePort = routePoints[0]
-    const sourceStub = routePoints[1]
-    const targetStub = routePoints[routePoints.length - 2]
-    const targetPort = routePoints[routePoints.length - 1]
-    if (!sourcePort || !sourceStub || !targetStub || !targetPort) {
+    const routedEdge = buildRoutedEdge(edge, routePoints)
+    if (!routedEdge) {
       routed.set(edge.id, edge)
       continue
     }
     routes.push(routePoints)
-    const sourceSide = sourceStub.x < sourcePort.x ? 'left' : sourceStub.x > sourcePort.x ? 'right' : sourceStub.y < sourcePort.y ? 'top' : 'bottom'
-    const targetSide = targetStub.x < targetPort.x ? 'left' : targetStub.x > targetPort.x ? 'right' : targetStub.y < targetPort.y ? 'top' : 'bottom'
-    routed.set(edge.id, {
-      ...edge,
-      type: 'flowRouted',
-      sourceHandle: sideHandle(sourceSide, 'source'),
-      targetHandle: sideHandle(targetSide, 'target'),
-      data: {
-        ...edge.data,
-        preferredSourceSide: edge.data?.preferredSourceSide ?? explicitSide(edge.sourceHandle, 'source') ?? undefined,
-        preferredTargetSide: edge.data?.preferredTargetSide ?? explicitSide(edge.targetHandle, 'target') ?? undefined,
-        routePoints,
-      },
-    })
+    routed.set(edge.id, routedEdge)
   }
 
   return edges.map((edge) => routed.get(edge.id) ?? edge)
