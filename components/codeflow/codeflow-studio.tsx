@@ -21,6 +21,33 @@ import { starterFiles } from '@/lib/codeflow-examples'
 import { SUPPORTED_LANGUAGES, LANGUAGE_DEFINITIONS, acceptedFileExtensions, getLanguageDefinition, isLanguage, languageFromFileName } from '@/lib/languages'
 import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
 import type { CodeFile, ExecutionOutput, Language, RunSnapshot, RunStatus, SafeValue, SandboxExecutionResult, TraceEntry } from '@/lib/codeflow-types'
+import {
+  createEmptyState,
+  createProject,
+  createFile,
+  createFolder,
+  addProject,
+  deleteProject,
+  updateProjectName,
+  deleteFolder,
+  deleteFile,
+  updateFileCode,
+  renameFile,
+  setActiveProject,
+  setActiveFile,
+  setActiveFolder,
+  getProject,
+  getActiveProject,
+  getFolder,
+  getFoldersInFolder,
+  getFilesInFolder,
+  getFile,
+  loadStorage,
+  saveStorage,
+  type Project,
+  type Folder,
+  type StorageState,
+} from '@/lib/storage'
 
 const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
   ssr: false,
@@ -28,7 +55,7 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
 })
 
 const achievementStorageKey = 'codeflow-achievements-v1'
-const workspaceStorageKey = 'codeflow-workspace-v1'
+const STORAGE_KEY = 'codeflow-storage-v1'
 
 type InspectorTab = 'variables' | 'stack' | 'history'
 type BottomTab = 'console' | 'trace'
@@ -65,8 +92,9 @@ function isStoredFile(value: unknown): value is CodeFile {
 
 export function CodeflowStudio() {
   const { mode, setMode, seed, setSeed, isDark } = useMaterialTheme()
-  const [files, setFiles] = useState<CodeFile[]>(starterFiles)
-  const [activeFileId, setActiveFileId] = useState(starterFiles[0].id)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [storageLoaded, setStorageLoaded] = useState(false)
   const [status, setStatus] = useState<RunStatus>('idle')
   const [trace, setTrace] = useState<TraceEntry[]>([])
   const [activeStep, setActiveStep] = useState(-1)
@@ -90,7 +118,6 @@ export function CodeflowStudio() {
   const [showHelp, setShowHelp] = useState(false)
   const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
   const [progressLoaded, setProgressLoaded] = useState(false)
-  const [workspaceLoaded, setWorkspaceLoaded] = useState(false)
   const [achievementsOpen, setAchievementsOpen] = useState(false)
   const [achievementToasts, setAchievementToasts] = useState<AchievementDefinition[]>([])
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
@@ -100,6 +127,12 @@ export function CodeflowStudio() {
   const fileSearchRef = useRef<HTMLInputElement>(null)
   const previousUnlocksRef = useRef<{ profileId: string; ids: Set<string> } | null>(null)
 
+  const storageState: StorageState = { version: 1, projects, activeProjectId }
+  const activeProject = getActiveProject(storageState)
+  const files = activeProject?.files ?? []
+  const folders = activeProject?.folders ?? []
+  const activeFileId = activeProject?.activeFileId ?? null
+  const activeFolderId = activeProject?.activeFolderId ?? null
   const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
   const displayCode = historicalView?.code ?? activeFile.code
   const displayLanguage = historicalView?.language ?? activeFile.language
@@ -118,34 +151,37 @@ export function CodeflowStudio() {
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
 
   useEffect(() => {
-    let restoredFiles: CodeFile[] = []
-    let restoredActiveId = ''
+    let restored: StorageState | null = null
     try {
-      const saved = window.localStorage.getItem(workspaceStorageKey)
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved)
-        if (parsed && typeof parsed === 'object' && 'files' in parsed && Array.isArray(parsed.files)) {
-          restoredFiles = parsed.files.filter(isStoredFile)
-          if ('activeFileId' in parsed && typeof parsed.activeFileId === 'string') restoredActiveId = parsed.activeFileId
-        }
-      }
+      restored = loadStorage()
     } catch {
-      restoredFiles = []
+      restored = null
     }
-    const nextFiles = restoredFiles.length ? restoredFiles : starterFiles
-    setFiles(nextFiles)
-    setActiveFileId(nextFiles.some((file) => file.id === restoredActiveId) ? restoredActiveId : nextFiles[0].id)
-    setWorkspaceLoaded(true)
+    if (restored?.projects.length) {
+      setProjects(restored.projects)
+      setActiveProjectId(restored.activeProjectId ?? restored.projects[0].id)
+    } else {
+      // Proyecto de ejemplo por defecto cuando no hay nada almacenado.
+      const starter = createProject('Proyecto de ejemplo')
+      const rootFolder = starter.folders[0]
+      let next = addProject(createEmptyState(), starter)
+      for (const file of starterFiles) {
+        next = createFile(next, starter.id, rootFolder.id, file.name, file.language, file.code)
+      }
+      next = setActiveFile(next, starter.id, starterFiles[0].id)
+      setProjects(next.projects)
+      setActiveProjectId(starter.id)
+    }
+    setStorageLoaded(true)
   }, [])
 
   useEffect(() => {
-    if (!workspaceLoaded) return
-    try {
-      window.localStorage.setItem(workspaceStorageKey, JSON.stringify({ version: 1, files, activeFileId }))
-    } catch {
+    if (!storageLoaded) return
+    const ok = saveStorage(storageState)
+    if (!ok) {
       setNotice('No se pudo guardar el proyecto local. Revisa el espacio disponible del navegador.')
     }
-  }, [activeFileId, files, workspaceLoaded])
+  }, [projects, activeProjectId, storageLoaded])
 
   useEffect(() => {
     let restored: ReturnType<typeof createAchievementProfile> | null = null
@@ -232,11 +268,22 @@ export function CodeflowStudio() {
     decorationIdsRef.current = editorRef.current.deltaDecorations(decorationIdsRef.current, decorations)
   }, [activeFileId, currentStep])
 
+  const mutateProject = useCallback((mutate: (state: StorageState) => StorageState) => {
+    setProjects((current) => {
+      const state: StorageState = { version: 1, projects: current, activeProjectId }
+      return mutate(state).projects
+    })
+  }, [activeProjectId])
+
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
-    setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, code } : file))
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project || project.activeFileId == null) return state
+      return updateFileCode(state, project.id, project.activeFileId, code)
+    })
     recordProgress({ type: 'edit', code })
-  }, [activeFileId, recordProgress])
+  }, [mutateProject, recordProgress])
 
   const openLine = useCallback((nodeId: string) => {
     const node = graph.nodes.find((item) => item.id === nodeId)

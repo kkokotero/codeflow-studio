@@ -14,6 +14,10 @@ export interface CodeFile {
   name: string
   language: Language
   code: string
+  /** Carpeta contenedora (null = carpeta raíz del proyecto). */
+  folderId?: string | null
+  /** Marca de tiempo de la última modificación del código. */
+  updatedAt?: number
 }
 
 export interface TraceEntry {
