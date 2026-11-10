@@ -7,7 +7,7 @@ import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Braces, Check,
   ChevronDown, CircleDot, Clock3, Code2, Copy, FileCode2, FilePlus2, Folder,
   GitBranch, History, Import, Keyboard, ListTree, LoaderCircle, PanelRight,
-  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal, Trophy, UserRoundPlus,
+  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal, Trophy,
   Square, Terminal, Trash2, Variable, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,7 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
 })
 
 const achievementStorageKey = 'codeflow-achievements-v1'
+const workspaceStorageKey = 'codeflow-workspace-v1'
 
 type InspectorTab = 'variables' | 'stack' | 'history'
 type BottomTab = 'console' | 'trace'
@@ -51,6 +52,15 @@ function formatBytes(bytes: number): string {
 
 function getExtension(name: string): Language {
   return languageFromFileName(name) ?? 'javascript'
+}
+
+function isStoredFile(value: unknown): value is CodeFile {
+  if (!value || typeof value !== 'object') return false
+  const file = value as Partial<CodeFile>
+  return typeof file.id === 'string'
+    && typeof file.name === 'string'
+    && typeof file.code === 'string'
+    && isLanguage(file.language)
 }
 
 export function CodeflowStudio() {
@@ -78,9 +88,9 @@ export function CodeflowStudio() {
   const [fileFilter, setFileFilter] = useState('')
   const [notice, setNotice] = useState(EXECUTION_READY_NOTICE)
   const [showHelp, setShowHelp] = useState(false)
-  const [profiles, setProfiles] = useState<ReturnType<typeof createAchievementProfile>[]>([])
-  const [activeProfileId, setActiveProfileId] = useState('')
+  const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
   const [progressLoaded, setProgressLoaded] = useState(false)
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false)
   const [achievementsOpen, setAchievementsOpen] = useState(false)
   const [achievementToasts, setAchievementToasts] = useState<AchievementDefinition[]>([])
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
@@ -91,7 +101,6 @@ export function CodeflowStudio() {
   const previousUnlocksRef = useRef<{ profileId: string; ids: Set<string> } | null>(null)
 
   const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
-  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
   const displayCode = historicalView?.code ?? activeFile.code
   const displayLanguage = historicalView?.language ?? activeFile.language
   const displayFileName = historicalView?.fileName ?? activeFile.name
@@ -109,49 +118,81 @@ export function CodeflowStudio() {
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
 
   useEffect(() => {
-    let restoredProfiles: ReturnType<typeof createAchievementProfile>[] = []
+    let restoredFiles: CodeFile[] = []
     let restoredActiveId = ''
+    try {
+      const saved = window.localStorage.getItem(workspaceStorageKey)
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved)
+        if (parsed && typeof parsed === 'object' && 'files' in parsed && Array.isArray(parsed.files)) {
+          restoredFiles = parsed.files.filter(isStoredFile)
+          if ('activeFileId' in parsed && typeof parsed.activeFileId === 'string') restoredActiveId = parsed.activeFileId
+        }
+      }
+    } catch {
+      restoredFiles = []
+    }
+    const nextFiles = restoredFiles.length ? restoredFiles : starterFiles
+    setFiles(nextFiles)
+    setActiveFileId(nextFiles.some((file) => file.id === restoredActiveId) ? restoredActiveId : nextFiles[0].id)
+    setWorkspaceLoaded(true)
+  }, [])
+
+  useEffect(() => {
+    if (!workspaceLoaded) return
+    try {
+      window.localStorage.setItem(workspaceStorageKey, JSON.stringify({ version: 1, files, activeFileId }))
+    } catch {
+      setNotice('No se pudo guardar el proyecto local. Revisa el espacio disponible del navegador.')
+    }
+  }, [activeFileId, files, workspaceLoaded])
+
+  useEffect(() => {
+    let restored: ReturnType<typeof createAchievementProfile> | null = null
     try {
       const saved = window.localStorage.getItem(achievementStorageKey)
       if (saved) {
         const parsed: unknown = JSON.parse(saved)
-        if (parsed && typeof parsed === 'object' && 'version' in parsed && parsed.version === 1 && 'profiles' in parsed && Array.isArray(parsed.profiles)) {
-          restoredProfiles = parsed.profiles.filter(isAchievementProfile).map(migrateAchievementProfile)
-          if ('activeProfileId' in parsed && typeof parsed.activeProfileId === 'string') restoredActiveId = parsed.activeProfileId
+        if (parsed && typeof parsed === 'object') {
+          if ('profile' in parsed && isAchievementProfile(parsed.profile)) {
+            restored = migrateAchievementProfile(parsed.profile)
+          } else if ('profiles' in parsed && Array.isArray(parsed.profiles)) {
+            const candidates = parsed.profiles.filter(isAchievementProfile)
+            const activeId = 'activeProfileId' in parsed && typeof parsed.activeProfileId === 'string' ? parsed.activeProfileId : ''
+            const chosen = candidates.find((candidate) => candidate.id === activeId) ?? candidates[0]
+            if (chosen) restored = migrateAchievementProfile(chosen)
+          }
         }
       }
     } catch {
-      restoredProfiles = []
+      restored = null
     }
-    if (!restoredProfiles.length) restoredProfiles = [createAchievementProfile('Integrante 1')]
-    setProfiles(restoredProfiles)
-    setActiveProfileId(restoredProfiles.some((profile) => profile.id === restoredActiveId) ? restoredActiveId : restoredProfiles[0].id)
+    setProfile(restored ?? createAchievementProfile('Integrante'))
     setProgressLoaded(true)
   }, [])
 
   useEffect(() => {
-    if (!progressLoaded) return
+    if (!progressLoaded || !profile) return
     try {
-      window.localStorage.setItem(achievementStorageKey, JSON.stringify({ version: 1, activeProfileId, profiles }))
+      window.localStorage.setItem(achievementStorageKey, JSON.stringify({ version: 2, profile }))
     } catch {
       setNotice('No se pudo guardar el progreso local. Revisa el espacio disponible del navegador.')
     }
-  }, [activeProfileId, profiles, progressLoaded])
+  }, [profile, progressLoaded])
 
   useEffect(() => {
-    if (!activeProfile || !progressLoaded) return
-    const ids = new Set(Object.keys(activeProfile.unlocked))
+    if (!profile || !progressLoaded) return
+    const ids = new Set(Object.keys(profile.unlocked))
     const previous = previousUnlocksRef.current
-    if (previous && previous.profileId !== activeProfile.id) setAchievementToasts([])
-    if (previous?.profileId === activeProfile.id) {
+    if (previous?.profileId === profile.id) {
       const newAchievements = [...ids]
         .filter((id) => !previous.ids.has(id))
         .map((id) => ACHIEVEMENTS.find((item) => item.id === id))
         .filter((achievement): achievement is AchievementDefinition => Boolean(achievement))
       if (newAchievements.length) setAchievementToasts((current) => [...current, ...newAchievements])
     }
-    previousUnlocksRef.current = { profileId: activeProfile.id, ids }
-  }, [activeProfile, progressLoaded])
+    previousUnlocksRef.current = { profileId: profile.id, ids }
+  }, [profile, progressLoaded])
 
   useEffect(() => {
     if (!achievementToasts.length) return
@@ -160,18 +201,7 @@ export function CodeflowStudio() {
   }, [achievementToasts])
 
   const recordProgress = useCallback((activity: AchievementActivity) => {
-    if (!activeProfileId) return
-    setProfiles((current) => current.map((profile) => profile.id === activeProfileId
-      ? recordAchievementActivity(profile, activity).profile
-      : profile))
-  }, [activeProfileId])
-
-  const addStaffProfile = useCallback(() => {
-    const name = window.prompt('Nombre del integrante del personal:')
-    if (!name?.trim()) return
-    const profile = createAchievementProfile(name)
-    setProfiles((current) => [...current, profile])
-    setActiveProfileId(profile.id)
+    setProfile((current) => current ? recordAchievementActivity(current, activity).profile : current)
   }, [])
 
   useEffect(() => {
@@ -404,6 +434,27 @@ export function CodeflowStudio() {
     recordProgress({ type: 'explore', feature: 'file' })
   }, [activeFile.language, files.length, recordProgress])
 
+  const deleteFile = useCallback((id: string) => {
+    if (files.length <= 1) {
+      setNotice('Debe quedar al menos un archivo en el proyecto.')
+      return
+    }
+    const index = files.findIndex((file) => file.id === id)
+    if (index < 0) return
+    const removed = files[index]
+    const remaining = files.filter((file) => file.id !== id)
+    setFiles(remaining)
+    if (activeFileId === id) setActiveFileId(remaining[Math.min(index, remaining.length - 1)].id)
+    setHistoricalView(null)
+    setSelectedNodeId(null)
+    setManualEdges([])
+    setTrace([])
+    setLogs([])
+    setActiveStep(-1)
+    setStatus('idle')
+    setNotice(`Archivo ${removed.name} eliminado.`)
+  }, [activeFileId, files])
+
   const importFiles = useCallback(async (items: FileList | null) => {
     if (!items?.length) return
     setIsImporting(true)
@@ -541,19 +592,13 @@ export function CodeflowStudio() {
         <div className="project-crumb"><Folder aria-hidden="true" /><span>proyectos</span><ChevronDown aria-hidden="true" /><span className="crumb-separator">/</span><strong>algoritmos-visuales</strong><ChevronDown aria-hidden="true" /></div>
         <div className="topbar-spacer" />
         <ColorThemeControls mode={mode} seed={seed} onModeChange={setMode} onSeedChange={setSeed} />
-        <div className="staff-controls">
-          <select className="staff-select" aria-label="Integrante activo" value={activeProfileId} onChange={(event) => setActiveProfileId(event.target.value)} disabled={!progressLoaded}>
-            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
-          <button className="staff-add" type="button" aria-label="Añadir integrante" title="Añadir integrante" onClick={addStaffProfile}><UserRoundPlus aria-hidden="true" /></button>
-        </div>
-        <button className={`achievement-nav ${achievementsOpen ? 'is-active' : ''}`} type="button" aria-pressed={achievementsOpen} onClick={() => setAchievementsOpen((open) => !open)}><Trophy aria-hidden="true" /><span>{achievementsOpen ? 'Editor' : 'Logros'}</span>{activeProfile && <small>{Object.keys(activeProfile.unlocked).length}</small>}</button>
+        <button className={`achievement-nav ${achievementsOpen ? 'is-active' : ''}`} type="button" aria-pressed={achievementsOpen} onClick={() => setAchievementsOpen((open) => !open)}><Trophy aria-hidden="true" /><span>{achievementsOpen ? 'Editor' : 'Logros'}</span>{profile && <small>{Object.keys(profile.unlocked).length}</small>}</button>
         <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
         <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}><Keyboard aria-hidden="true" /></Button>
         <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
       </header>
 
-      {achievementsOpen ? activeProfile ? <AchievementsView profile={activeProfile} /> : <section className="achievement-loading">Cargando progreso local…</section> : <>
+      {achievementsOpen ? profile ? <AchievementsView profile={profile} /> : <section className="achievement-loading">Cargando progreso local…</section> : <>
       <section className="toolbar" aria-label="Controles del proyecto">
         <div className="toolbar-left">
           <div className="runtime-select-wrap">
@@ -595,14 +640,16 @@ export function CodeflowStudio() {
           <label className="file-search"><Search aria-hidden="true" /><input ref={fileSearchRef} value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="Filtrar archivos" aria-label="Filtrar archivos" /><kbd>⌘ P</kbd></label>
           <div className="file-list" role="list" aria-label="Archivos">
             {filteredFiles.map((file) => (
-              <button className={`file-row ${activeFileId === file.id ? 'is-active' : ''}`} type="button" role="listitem" key={file.id} onClick={() => { setHistoricalView(null); setActiveFileId(file.id); setSelectedNodeId(null); setManualEdges([]); setTrace([]); setLogs([]); setActiveStep(-1); setStatus('idle') }} disabled={isRuntimeBusy}>
-                <span className={`file-language file-language--${file.language}`}>{getLanguageDefinition(file.language).mark}</span><span className="file-name">{file.name.split('/').at(-1)}</span>{activeFileId === file.id && <span className="file-edited-dot" aria-label="Archivo abierto" />}
-              </button>
+              <div className={`file-row-wrap ${activeFileId === file.id ? 'is-active' : ''}`} role="listitem" key={file.id}>
+                <button className={`file-row ${activeFileId === file.id ? 'is-active' : ''}`} type="button" onClick={() => { setHistoricalView(null); setActiveFileId(file.id); setSelectedNodeId(null); setManualEdges([]); setTrace([]); setLogs([]); setActiveStep(-1); setStatus('idle') }} disabled={isRuntimeBusy}>
+                  <span className={`file-language file-language--${file.language}`}>{getLanguageDefinition(file.language).mark}</span><span className="file-name">{file.name.split('/').at(-1)}</span>{activeFileId === file.id && <span className="file-edited-dot" aria-label="Archivo abierto" />}
+                </button>
+                <button className="file-delete" type="button" aria-label={`Eliminar ${file.name}`} title="Eliminar archivo" onClick={() => deleteFile(file.id)} disabled={isRuntimeBusy || files.length <= 1}><Trash2 aria-hidden="true" /></button>
+              </div>
             ))}
             {filteredFiles.length === 0 && <div className="file-empty">No se encontraron archivos</div>}
           </div>
           <div className="files-actions"><Button variant="ghost" size="sm" onClick={addFile} disabled={isRuntimeBusy || Boolean(historicalView)}><Plus data-icon="inline-start" aria-hidden="true" />Nuevo archivo</Button><Button variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} aria-label="Importar archivos" title="Importar archivos" disabled={isRuntimeBusy}><Import aria-hidden="true" /></Button></div>
-          <div className="sidebar-bottom"><div className="sidebar-bottom__row"><GitBranch aria-hidden="true" /><span>main</span><span className="sidebar-bottom__status">sin guardar</span></div><div className="sidebar-bottom__row"><Activity aria-hidden="true" /><span>Análisis estático</span><span className="sidebar-bottom__status">activo</span></div></div>
         </aside>
 
         <section className={`editor-pane workspace-panel ${mobilePane === 'editor' ? 'mobile-active' : ''}`} aria-label="Editor de código">
