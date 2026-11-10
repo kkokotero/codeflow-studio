@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'CodeFlow Studio — código visual, paso a paso',
-  description: 'Un espacio interactivo para ejecutar JavaScript y Python, visualizar su estructura y explorar estados reales de cada instrucción.',
+  title: 'CodeFlow Studio — diagramas de flujo estáticos',
+  description: 'Editor visual para analizar la lógica de JavaScript y Python sin ejecutar código arbitrario.',
   applicationName: 'CodeFlow Studio',
   generator: 'v0.app',
   icons: {

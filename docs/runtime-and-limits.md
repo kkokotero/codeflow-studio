@@ -1,24 +1,22 @@
-# CodeFlow Studio: runtimes and limits
+# Análisis estático y límites de seguridad
 
-## Supported execution adapters
+## Ejecución de código
 
-CodeFlow Studio currently runs JavaScript and Python. The adapter registry is `lib/runtime-adapters.ts`; adding a language requires an adapter, an isolated worker, a source-to-source instrumentation step, and tests for actual variable snapshots and failures. Languages shown as coming soon in the UI are not executable.
+La ejecución arbitraria de JavaScript y Python está desactivada. El editor no evalúa el código, no crea workers de ejecución y no envía el texto a una API para ejecutarlo. El botón de ejecución permanece deshabilitado y el motivo se muestra en la interfaz.
 
-- **JavaScript:** Babel parses the source and inserts trace hooks after executable statements. A disposable Web Worker evaluates the instrumented program. The worker has no DOM access; common network and script-loading entry points are blocked. The worker is terminated after the run or its 10-second execution deadline.
-- **Python:** Pyodide runs Python/WebAssembly in a disposable Web Worker. Python's AST transformer captures line and local-variable snapshots. Imports are limited to a small standard-library allowlist, and dynamic `eval`, `exec`, and `compile` calls from user code are rejected. Pyodide's WebAssembly files are loaded from jsDelivr on first use.
+El runtime local anterior no ofrecía aislamiento suficiente para tratar código pegado como confiable. La ejecución solo debería reactivarse tras incorporar un entorno aislado de verdad, con límites de CPU, memoria, tiempo y red, y pruebas específicas de aislamiento. Hasta entonces, CodeFlow conserva el editor, la importación/exportación y el diagrama estático; no muestra valores calculados, salida real, pila de llamadas ni snapshots.
 
-Snapshots are captured during actual execution and replayed for inspection. Playback controls navigate recorded states; they do not rewind or re-execute the program. Breakpoints pause that replay after the captured run rather than suspending the interpreter mid-run.
+## Diagramas
 
-## Limits and trust
+- JavaScript se analiza con el AST de Babel y Python con la gramática de `@lezer/python`; ninguno de los analizadores ejecuta el código fuente.
+- Los diagramas muestran entradas y salidas, procesos, decisiones, ciclos, funciones, retornos y conectores de convergencia.
+- Las expresiones y literales se resumen dentro del proceso que los usa; no se expanden a nodos independientes.
+- Las ramas de `switch` y `match` conservan sus etiquetas. Los caminos `break`, `continue` y `return` se conectan a sus destinos semánticos.
+- La sintaxis inválida o una construcción que no se pueda representar fielmente produce un aviso sin un gráfico parcial engañoso.
 
-Source input is limited to 50,000 characters, snapshots to 2,000 statements, nested values to three levels and 50 items per collection, and call-stack display to 64 frames. Execution has a 10-second watchdog. Browsers do not provide a portable per-Worker memory quota, so this is not a hardened service for running hostile code; use only code you trust. The app does not upload source or run history. Files and snapshots are held in the current tab and can be exported manually.
+## Límites
 
-The Python runtime is downloaded from jsDelivr when first used. Offline use requires that runtime to have been cached by the browser. Multi-file projects are editable/importable as a collection, but module resolution between files is not implemented yet; execution runs the active file only.
-
-## Diagram behavior
-
-JavaScript structure is parsed with Babel; Python structure is recognized from source lines. Selecting a diagram node navigates to its source line. Editing the selected source line in the inspector updates the editor and rebuilds the diagram. If the editor changes that line while the inspector has a draft, CodeFlow Studio reports a conflict and asks you to reload the current editor line before applying the draft. Dragged nodes and manually connected edges are diagram annotations; they do not rewrite program logic. Diagram structure and connections can be exported as JSON.
-
-## Checks
-
-The structural analyzer tests live in `lib/diagram.test.ts` and run with Vitest. Browser verification should cover the JavaScript worker and Python/WASM worker separately, including a successful run, runtime errors, and timeout/stop behavior.
+- El análisis se limita a 50.000 caracteres, 180 nodos y 24 niveles de anidación. Si se supera un límite, no se produce un diagrama parcial.
+- `try/finally` y el control etiquetado no se representan todavía; CodeFlow informa esta limitación en vez de inventar rutas.
+- Las llamadas dinámicas y las expresiones de colección se resumen como procesos. El diagrama no resuelve tipos, imports ni destinos dinámicos de llamadas.
+- Las modificaciones e importaciones permanecen en la sesión del navegador hasta que se exportan. El proyecto no tiene un backend de guardado ni endpoints de ejecución.

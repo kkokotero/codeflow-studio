@@ -1,9 +1,10 @@
 import type { Edge, Node } from '@xyflow/react'
 
 export type Language = 'javascript' | 'python'
-export type NodeKind = 'function' | 'variable' | 'object' | 'event' | 'condition' | 'loop' | 'class' | 'call' | 'return' | 'import' | 'statement' | 'operation' | 'phase'
+export type NodeKind = 'start' | 'end' | 'connector' | 'io' | 'function' | 'variable' | 'object' | 'event' | 'condition' | 'loop' | 'class' | 'call' | 'return' | 'import' | 'statement' | 'operation' | 'phase'
+export type FlowShape = 'terminator' | 'process' | 'decision' | 'input-output' | 'connector'
 export type OperationCategory = 'read' | 'write' | 'literal' | 'arithmetic' | 'comparison' | 'logical' | 'assignment' | 'call' | 'access' | 'collection' | 'conditional' | 'unary' | 'template'
-export type FlowEdgeRole = 'control' | 'data' | 'true' | 'false' | 'repeat' | 'exit' | 'body' | 'operand' | 'case' | 'exception' | 'merge'
+export type FlowEdgeRole = 'control' | 'data' | 'true' | 'false' | 'repeat' | 'exit' | 'body' | 'operand' | 'case' | 'exception' | 'merge' | 'unreachable'
 export type RunStatus = 'idle' | 'loading' | 'running' | 'paused' | 'complete' | 'stopped' | 'error'
 export type SafeValue = null | boolean | number | string | SafeValue[] | { [key: string]: SafeValue }
 
@@ -31,6 +32,9 @@ export interface FlowCardData extends Record<string, unknown> {
   line: number
   detail: string
   active: boolean
+  shape?: FlowShape
+  source?: string
+  lineEnd?: number
   expression?: string
   operationId?: string
   operationCategory?: OperationCategory
