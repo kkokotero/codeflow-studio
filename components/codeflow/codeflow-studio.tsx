@@ -469,17 +469,19 @@ export function CodeflowStudio() {
     const number = files.length + 1
     const extension = getLanguageDefinition(language).extension
     const name = `src/nuevo-${number}.${extension}`
-    const id = `file-${Date.now()}`
     setHistoricalView(null)
-    setFiles((current) => [...current, { id, name, language, code: '' }])
-    setActiveFileId(id)
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return createFile(state, project.id, project.activeFolderId, name, language, '')
+    })
     setTrace([])
     setLogs([])
     setActiveStep(-1)
     setStatus('idle')
     setNotice(`Archivo ${name} creado.`)
     recordProgress({ type: 'explore', feature: 'file' })
-  }, [activeFile.language, files.length, recordProgress])
+  }, [activeFile.language, files.length, mutateProject, recordProgress])
 
   const deleteFile = useCallback((id: string) => {
     if (files.length <= 1) {
