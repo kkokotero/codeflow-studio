@@ -42,12 +42,25 @@ export interface FlowCardData extends Record<string, unknown> {
 }
 
 export type FlowCardNode = Node<FlowCardData, 'flowCard'>
-export type FlowCardEdge = Edge<{ role?: FlowEdgeRole }>
+export type FlowCardEdge = Edge<{ role?: FlowEdgeRole; routeX?: number }>
 
 export interface DiagramGraph {
   nodes: FlowCardNode[]
   edges: FlowCardEdge[]
   error?: string
+}
+
+export interface ExecutionOutput {
+  stream: 'stdout' | 'stderr'
+  text: string
+}
+
+export interface SandboxExecutionResult {
+  output: ExecutionOutput[]
+  exitCode: number
+  durationMs: number
+  timedOut: boolean
+  outputTruncated: boolean
 }
 
 export interface RunSnapshot {
@@ -58,7 +71,7 @@ export interface RunSnapshot {
   code: string
   createdAt: number
   steps: TraceEntry[]
-  output: string[]
+  output: ExecutionOutput[]
 }
 
 export interface RuntimeMessage {

@@ -9,8 +9,10 @@ describe('analyzeCode', () => {
     expect(analyzeCode('  \n ', 'javascript')).toEqual({ nodes: [], edges: [] })
   })
 
-  it('summarizes JavaScript expressions as one process and uses standard flowchart shapes', () => {
+  it('summarizes JavaScript expressions as one vertical process and uses standard flowchart shapes', () => {
     const graph = analyzeCode('const total = (a + b) * scale - offset\nconsole.log(total)', 'javascript')
+    const assignment = nodesOfKind(graph, 'variable')[0]
+    const output = nodesOfKind(graph, 'io')[0]
 
     expect(graph.error).toBeUndefined()
     expect(nodesOfKind(graph, 'operation')).toHaveLength(0)
@@ -18,28 +20,40 @@ describe('analyzeCode', () => {
     expect(nodesOfKind(graph, 'io')).toHaveLength(1)
     expect(nodesOfKind(graph, 'start')[0].data.shape).toBe('terminator')
     expect(nodesOfKind(graph, 'end')[0].data.shape).toBe('terminator')
-    expect(nodesOfKind(graph, 'variable')[0].data.shape).toBe('process')
-    expect(nodesOfKind(graph, 'io')[0].data.shape).toBe('input-output')
+    expect(assignment.data.shape).toBe('process')
+    expect(output.data.shape).toBe('input-output')
+    expect(output.position.y).toBeGreaterThan(assignment.position.y)
     expect(graph.nodes.length).toBeLessThanOrEqual(5)
   })
 
-  it('shows explicit true and false paths for JavaScript branches', () => {
+  it('shows explicit vertical true and false branches for JavaScript decisions', () => {
     const graph = analyzeCode('if (ready) {\n  send()\n} else {\n  wait()\n}', 'javascript')
+    const decision = nodesOfKind(graph, 'condition')[0]
+    const branches = graph.edges.filter((edge) => edge.source === decision.id && (edge.data?.role === 'true' || edge.data?.role === 'false'))
+    const targets = branches.map((edge) => graph.nodes.find((node) => node.id === edge.target)!)
 
     expect(graph.error).toBeUndefined()
-    expect(nodesOfKind(graph, 'condition')[0].data.shape).toBe('decision')
+    expect(decision.data.shape).toBe('decision')
     expect(edgesWithRole(graph, 'true')).toHaveLength(1)
     expect(edgesWithRole(graph, 'false')).toHaveLength(1)
     expect(nodesOfKind(graph, 'connector')).toHaveLength(1)
+    expect(new Set(branches.map((edge) => edge.sourceHandle)).size).toBe(2)
+    expect(new Set(targets.map((node) => node.position.x)).size).toBe(2)
+    expect(targets.every((node) => node.position.y > decision.position.y)).toBe(true)
   })
 
-  it('routes JavaScript loop control to repeat and exit paths', () => {
+  it('routes JavaScript loop returns outside the vertical sequence', () => {
     const graph = analyzeCode('for (const item of items) {\n  if (!item) continue\n  if (item.done) break\n  process(item)\n}', 'javascript')
+    const loop = nodesOfKind(graph, 'loop')[0]
+    const repeatEdges = edgesWithRole(graph, 'repeat')
 
     expect(graph.error).toBeUndefined()
     expect(nodesOfKind(graph, 'loop')).toHaveLength(1)
-    expect(edgesWithRole(graph, 'repeat').length).toBeGreaterThan(0)
+    expect(repeatEdges.length).toBeGreaterThan(0)
+    expect(repeatEdges.every((edge) => edge.type === 'flowLoop' && Number.isFinite(edge.data?.routeX))).toBe(true)
+    expect(repeatEdges.every((edge) => edge.targetHandle === 'target-left' || edge.targetHandle === 'target-right')).toBe(true)
     expect(edgesWithRole(graph, 'exit').length).toBeGreaterThan(0)
+    expect(loop.position.y).toBeLessThan(Math.max(...graph.nodes.map((node) => node.position.y)))
   })
 
   it('creates an analyzable subflow for JavaScript arrow functions', () => {

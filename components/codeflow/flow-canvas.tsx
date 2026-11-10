@@ -1,9 +1,10 @@
 'use client'
 
-import { memo, useCallback, useEffect, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   Background,
   Controls,
+  MarkerType,
   MiniMap,
   ReactFlow,
   useEdgesState,
@@ -13,16 +14,23 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { FlowNode } from '@/components/codeflow/flow-node'
+import { FlowLoopEdge } from '@/components/codeflow/flow-loop-edge'
 import type { DiagramGraph, FlowCardData, FlowCardEdge } from '@/lib/codeflow-types'
 
 const nodeTypes = { flowCard: FlowNode }
+const edgeTypes = { flowLoop: FlowLoopEdge }
 
 function AutoFit({ nodeKey }: { nodeKey: string }) {
-  const { fitView } = useReactFlow()
+  const { fitView, getNodes } = useReactFlow()
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => fitView({ padding: 0.22, maxZoom: 1.1 }))
+    const frame = window.requestAnimationFrame(() => {
+      const openingNodes = [...getNodes()]
+        .sort((left, right) => left.position.y - right.position.y)
+        .slice(0, 4)
+      void fitView({ nodes: openingNodes, padding: 0.12, minZoom: 0.72, maxZoom: 1.05, duration: 180 })
+    })
     return () => window.cancelAnimationFrame(frame)
-  }, [fitView, nodeKey])
+  }, [fitView, getNodes, nodeKey])
   return null
 }
 
@@ -46,15 +54,26 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
         : node.data.line === activeLine,
     },
   })), [activeLine, activeOperationId, graph.nodes])
+  const layoutKey = useMemo(() => [
+    graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join('|'),
+    graph.edges.map((edge) => `${edge.source}>${edge.target}:${edge.data?.role ?? ''}`).join('|'),
+  ].join('::'), [graph.edges, graph.nodes])
+  const previousLayoutKey = useRef(layoutKey)
   const [nodes, setNodes, onNodesChange] = useNodesState(activeNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState([...graph.edges, ...manualEdges])
 
   useEffect(() => {
+    const preserveDraggedPositions = previousLayoutKey.current === layoutKey
     setNodes((current) => activeNodes.map((next) => {
       const existing = current.find((node) => node.id === next.id)
-      return existing ? { ...next, position: existing.position, selected: existing.selected } : next
+      return existing ? {
+        ...next,
+        position: preserveDraggedPositions ? existing.position : next.position,
+        selected: existing.selected,
+      } : next
     }))
-  }, [activeNodes, setNodes])
+    previousLayoutKey.current = layoutKey
+  }, [activeNodes, layoutKey, setNodes])
 
   useEffect(() => {
     const validNodeIds = new Set(graph.nodes.map((node) => node.id))
@@ -83,9 +102,10 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
         target: connection.target,
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
-        animated: false,
-        style: { stroke: '#7a8b82' },
-        data: { role: 'control' },
+          animated: false,
+          style: { stroke: '#7a8b82' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#7a8b82' },
+          data: { role: 'control' },
       }]
       onConnectNodes(next.filter((edge) => edge.id.startsWith('edge-user-')).length)
       return next
@@ -107,18 +127,17 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={connect}
           onNodeClick={(_, node) => onSelectNode(node.id)}
-          fitView
-          fitViewOptions={{ padding: 0.22 }}
           minZoom={0.25}
           maxZoom={1.6}
           nodesConnectable
           nodesDraggable
         >
-          <AutoFit nodeKey={graph.nodes.map((node) => node.id).join(',')} />
+          <AutoFit nodeKey={layoutKey} />
           <Background color="#26302d" gap={20} size={1} />
           <Controls position="bottom-left" showInteractive={false} />
           <MiniMap position="top-right" style={{ width: 118, height: 82 }} nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, #72807b)`} maskColor="rgba(7, 10, 13, 0.72)" />

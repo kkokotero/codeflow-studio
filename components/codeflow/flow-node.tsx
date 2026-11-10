@@ -70,6 +70,10 @@ export const FlowNode = memo(function FlowNode({ data, selected }: NodeProps<Flo
     <div className={`flow-node flow-node--${data.kind} flow-node--shape-${shape} ${data.active ? 'is-active' : ''} ${selected ? 'is-selected' : ''}`} title={data.source ?? data.expression ?? data.label} role="group" aria-label={`${typeLabel}: ${data.label}. ${lineLabel}. ${data.detail}`}>
       <div className="flow-node__shape" aria-hidden="true" />
       <Handle type="target" position={Position.Top} className="flow-handle" />
+      <Handle type="target" position={Position.Left} id="target-left" className="flow-handle flow-handle--route" />
+      <Handle type="target" position={Position.Right} id="target-right" className="flow-handle flow-handle--route" />
+      <Handle type="source" position={Position.Left} id="source-left" className="flow-handle flow-handle--route" />
+      <Handle type="source" position={Position.Right} id="source-right" className="flow-handle flow-handle--route" />
       <div className="flow-node__content">
         <div className="flow-node__meta">
           <span className="flow-node__type"><Icon aria-hidden="true" /> {typeLabel}</span>
