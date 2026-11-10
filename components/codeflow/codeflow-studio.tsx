@@ -7,13 +7,15 @@ import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Braces, Check,
   ChevronDown, CircleDot, Clock3, Code2, Copy, FileCode2, FilePlus2, Folder,
   GitBranch, History, Import, Keyboard, ListTree, LoaderCircle, PanelRight,
-  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal,
+  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal, Trophy, UserRoundPlus,
   Square, Terminal, Trash2, Variable, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
 import { ColorThemeControls, useMaterialTheme } from '@/components/codeflow/color-theme-controls'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
+import { AchievementsView } from '@/components/codeflow/achievements-view'
+import { ACHIEVEMENTS, createAchievementProfile, isAchievementProfile, recordAchievementActivity, type AchievementActivity, type AchievementDefinition } from '@/lib/achievements'
 import { analyzeCode } from '@/lib/diagram'
 import { starterFiles } from '@/lib/codeflow-examples'
 import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
@@ -26,6 +28,7 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
 
 const languageNames: Record<Language, string> = { javascript: 'JavaScript', python: 'Python' }
 const runtimeNames: Record<Language, string> = { javascript: 'Node 24 · aislado', python: 'Python 3.14 · aislado' }
+const achievementStorageKey = 'codeflow-achievements-v1'
 
 type InspectorTab = 'variables' | 'stack' | 'history'
 type BottomTab = 'console' | 'trace'
@@ -76,13 +79,20 @@ export function CodeflowStudio() {
   const [fileFilter, setFileFilter] = useState('')
   const [notice, setNotice] = useState(EXECUTION_READY_NOTICE)
   const [showHelp, setShowHelp] = useState(false)
+  const [profiles, setProfiles] = useState<ReturnType<typeof createAchievementProfile>[]>([])
+  const [activeProfileId, setActiveProfileId] = useState('')
+  const [progressLoaded, setProgressLoaded] = useState(false)
+  const [achievementsOpen, setAchievementsOpen] = useState(false)
+  const [achievementToasts, setAchievementToasts] = useState<AchievementDefinition[]>([])
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const executionAbortRef = useRef<AbortController | null>(null)
   const decorationIdsRef = useRef<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileSearchRef = useRef<HTMLInputElement>(null)
+  const previousUnlocksRef = useRef<{ profileId: string; ids: Set<string> } | null>(null)
 
   const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
   const displayCode = historicalView?.code ?? activeFile.code
   const displayLanguage = historicalView?.language ?? activeFile.language
   const displayFileName = historicalView?.fileName ?? activeFile.name
@@ -98,6 +108,72 @@ export function CodeflowStudio() {
   const sortedVariables = useMemo(() => Object.entries(currentStep?.locals ?? {}).sort(([left], [right]) => left.localeCompare(right)), [currentStep])
   const visibleVariables = useMemo(() => sortedVariables.filter(([name]) => name.toLowerCase().includes(variableQuery.trim().toLowerCase())), [sortedVariables, variableQuery])
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
+
+  useEffect(() => {
+    let restoredProfiles: ReturnType<typeof createAchievementProfile>[] = []
+    let restoredActiveId = ''
+    try {
+      const saved = window.localStorage.getItem(achievementStorageKey)
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved)
+        if (parsed && typeof parsed === 'object' && 'version' in parsed && parsed.version === 1 && 'profiles' in parsed && Array.isArray(parsed.profiles)) {
+          restoredProfiles = parsed.profiles.filter(isAchievementProfile)
+          if ('activeProfileId' in parsed && typeof parsed.activeProfileId === 'string') restoredActiveId = parsed.activeProfileId
+        }
+      }
+    } catch {
+      restoredProfiles = []
+    }
+    if (!restoredProfiles.length) restoredProfiles = [createAchievementProfile('Integrante 1')]
+    setProfiles(restoredProfiles)
+    setActiveProfileId(restoredProfiles.some((profile) => profile.id === restoredActiveId) ? restoredActiveId : restoredProfiles[0].id)
+    setProgressLoaded(true)
+  }, [])
+
+  useEffect(() => {
+    if (!progressLoaded) return
+    try {
+      window.localStorage.setItem(achievementStorageKey, JSON.stringify({ version: 1, activeProfileId, profiles }))
+    } catch {
+      setNotice('No se pudo guardar el progreso local. Revisa el espacio disponible del navegador.')
+    }
+  }, [activeProfileId, profiles, progressLoaded])
+
+  useEffect(() => {
+    if (!activeProfile || !progressLoaded) return
+    const ids = new Set(Object.keys(activeProfile.unlocked))
+    const previous = previousUnlocksRef.current
+    if (previous && previous.profileId !== activeProfile.id) setAchievementToasts([])
+    if (previous?.profileId === activeProfile.id) {
+      const newAchievements = [...ids]
+        .filter((id) => !previous.ids.has(id))
+        .map((id) => ACHIEVEMENTS.find((item) => item.id === id))
+        .filter((achievement): achievement is AchievementDefinition => Boolean(achievement))
+      if (newAchievements.length) setAchievementToasts((current) => [...current, ...newAchievements])
+    }
+    previousUnlocksRef.current = { profileId: activeProfile.id, ids }
+  }, [activeProfile, progressLoaded])
+
+  useEffect(() => {
+    if (!achievementToasts.length) return
+    const timeout = window.setTimeout(() => setAchievementToasts((current) => current.slice(1)), 4_000)
+    return () => window.clearTimeout(timeout)
+  }, [achievementToasts])
+
+  const recordProgress = useCallback((activity: AchievementActivity) => {
+    if (!activeProfileId) return
+    setProfiles((current) => current.map((profile) => profile.id === activeProfileId
+      ? recordAchievementActivity(profile, activity).profile
+      : profile))
+  }, [activeProfileId])
+
+  const addStaffProfile = useCallback(() => {
+    const name = window.prompt('Nombre del integrante del personal:')
+    if (!name?.trim()) return
+    const profile = createAchievementProfile(name)
+    setProfiles((current) => [...current, profile])
+    setActiveProfileId(profile.id)
+  }, [])
 
   useEffect(() => {
     if (status !== 'complete' || !isPlaying || trace.length < 2) return
@@ -130,7 +206,12 @@ export function CodeflowStudio() {
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
     setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, code } : file))
-  }, [activeFileId])
+    if (activeProfile && code.trim() && (!activeProfile.stats.hasWrittenCode
+      || (activeProfile.stats.hadFailedRun && !activeProfile.stats.editedAfterFailure)
+      || (activeProfile.stats.successfulRuns > 0 && !activeProfile.stats.hasRefinedProgram))) {
+      recordProgress({ type: 'edit', code })
+    }
+  }, [activeFileId, activeProfile, recordProgress])
 
   const openLine = useCallback((nodeId: string) => {
     const node = graph.nodes.find((item) => item.id === nodeId)
@@ -236,6 +317,17 @@ export function CodeflowStudio() {
 
       const failed = result.exitCode !== 0 || result.timedOut || result.outputTruncated
       setStatus(failed ? 'error' : 'complete')
+      if (failed) recordProgress({ type: 'run-failure' })
+      else {
+        const executionGraph = analyzeCode(activeFile.code, activeFile.language)
+        recordProgress({
+          type: 'run-success',
+          language: activeFile.language,
+          output: output.filter((entry) => entry.stream === 'stdout').map((entry) => entry.text).join('\n'),
+          nodeCount: executionGraph.nodes.length,
+          nodeKinds: executionGraph.nodes.map((node) => node.data.kind),
+        })
+      }
       if (result.timedOut) setNotice(`Tiempo límite alcanzado · ${MAX_EXECUTION_TIME_MS / 1_000} s · proceso detenido.`)
       else if (result.outputTruncated) setNotice(`Salida limitada a ${Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB · proceso detenido.`)
       else if (result.exitCode !== 0) setNotice(`El proceso terminó con código ${result.exitCode} · revisa stderr.`)
@@ -251,7 +343,7 @@ export function CodeflowStudio() {
     } finally {
       if (executionAbortRef.current === controller) executionAbortRef.current = null
     }
-  }, [activeFile, historicalView])
+  }, [activeFile, historicalView, recordProgress])
 
   const cancelExecution = useCallback(() => {
     executionAbortRef.current?.abort()
@@ -313,7 +405,8 @@ export function CodeflowStudio() {
     setActiveStep(-1)
     setStatus('idle')
     setNotice(`Archivo ${name} creado.`)
-  }, [activeFile.language, files.length])
+    recordProgress({ type: 'explore', feature: 'file' })
+  }, [activeFile.language, files.length, recordProgress])
 
   const importFiles = useCallback(async (items: FileList | null) => {
     if (!items?.length) return
@@ -353,13 +446,14 @@ export function CodeflowStudio() {
       setActiveStep(-1)
       setStatus('idle')
       setNotice(`${imported.length} archivo${imported.length === 1 ? '' : 's'} importado${imported.length === 1 ? '' : 's'}.`)
+      recordProgress({ type: 'explore', feature: 'file' })
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'No se pudieron leer los archivos seleccionados.')
     } finally {
       setIsImporting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
-  }, [])
+  }, [recordProgress])
 
   const exportActiveFile = useCallback(() => {
     const blob = new Blob([displayCode], { type: 'text/plain;charset=utf-8' })
@@ -433,7 +527,7 @@ export function CodeflowStudio() {
   const filteredFiles = files.filter((file) => file.name.toLowerCase().includes(fileFilter.toLowerCase()))
 
   return (
-    <main className="codeflow-shell">
+    <main className={`codeflow-shell ${achievementsOpen ? 'codeflow-shell--achievements' : ''}`}>
       <header className="topbar">
         <a className="brand" href="#inicio" aria-label="CodeFlow Studio, inicio">
           <span className="brand-mark"><Code2 aria-hidden="true" /></span>
@@ -443,17 +537,26 @@ export function CodeflowStudio() {
         <div className="project-crumb"><Folder aria-hidden="true" /><span>proyectos</span><ChevronDown aria-hidden="true" /><span className="crumb-separator">/</span><strong>algoritmos-visuales</strong><ChevronDown aria-hidden="true" /></div>
         <div className="topbar-spacer" />
         <ColorThemeControls mode={mode} seed={seed} onModeChange={setMode} onSeedChange={setSeed} />
+        <div className="staff-controls">
+          <select className="staff-select" aria-label="Integrante activo" value={activeProfileId} onChange={(event) => setActiveProfileId(event.target.value)} disabled={!progressLoaded}>
+            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          </select>
+          <button className="staff-add" type="button" aria-label="Añadir integrante" title="Añadir integrante" onClick={addStaffProfile}><UserRoundPlus aria-hidden="true" /></button>
+        </div>
+        <button className={`achievement-nav ${achievementsOpen ? 'is-active' : ''}`} type="button" aria-pressed={achievementsOpen} onClick={() => setAchievementsOpen((open) => !open)}><Trophy aria-hidden="true" /><span>{achievementsOpen ? 'Editor' : 'Logros'}</span>{activeProfile && <small>{Object.keys(activeProfile.unlocked).length}</small>}</button>
         <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
         <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => setShowHelp(true)}><Keyboard aria-hidden="true" /></Button>
         <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
       </header>
 
+      {achievementsOpen ? activeProfile ? <AchievementsView profile={activeProfile} /> : <section className="achievement-loading">Cargando progreso local…</section> : <>
       <section className="toolbar" aria-label="Controles del proyecto">
         <div className="toolbar-left">
           <div className="runtime-select-wrap">
             <span className={`language-mark language-mark--${displayLanguage}`}>{displayLanguage === 'python' ? 'Py' : 'JS'}</span>
             <select aria-label="Lenguaje del archivo" value={displayLanguage} disabled={isRuntimeBusy || Boolean(historicalView)} onChange={(event) => {
               const language = event.target.value as Language
+              if (language !== activeFile.language) recordProgress({ type: 'explore', feature: 'language' })
               setHistoricalView(null)
               const extension = language === 'python' ? '.py' : '.js'
               setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, language, name: file.name.replace(/\.(js|jsx|mjs|py)$/i, extension) } : file))
@@ -534,7 +637,7 @@ export function CodeflowStudio() {
             <div className="diagram-actions"><span className="live-indicator"><span />ANÁLISIS ESTÁTICO</span><Button variant="ghost" size="icon-xs" aria-label="Exportar diagrama JSON" title="Exportar diagrama JSON" onClick={exportDiagram}><ArrowDownToLine aria-hidden="true" /></Button></div>
           </div>
           <div className="diagram-body">
-            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} activeOperationId={currentStep?.operationId ?? null} onSelectNode={openLine} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
+            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} activeOperationId={currentStep?.operationId ?? null} onSelectNode={(nodeId) => { recordProgress({ type: 'explore', feature: 'diagram' }); openLine(nodeId) }} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
           </div>
           <div className="diagram-footer"><span><span className="legend-shape legend-shape--terminator" />Inicio / fin</span><span><span className="legend-shape legend-shape--process" />Proceso</span><span><span className="legend-shape legend-shape--decision" />Decisión</span><span><span className="legend-shape legend-shape--io" />Entrada / salida</span><span><span className="legend-shape legend-shape--connector" />Conector</span><span className="diagram-footer__hint">Arrastra para recorrer</span></div>
         </section>
@@ -617,6 +720,8 @@ export function CodeflowStudio() {
       </nav>
 
       <footer className="statusbar"><span><span className={`statusbar-dot statusbar-dot--${status}`} />{status === 'loading' || status === 'running' ? 'Ejecutando en microVM' : status === 'error' ? 'Error de ejecución' : status === 'stopped' ? 'Ejecución detenida' : status === 'complete' ? 'Ejecución completada' : 'Runtime aislado'}</span><span>Sin red · 8 s · salida 16 KB máx.</span><span>{graph.nodes.length} símbolos de flujo</span><span className="statusbar-right">{displayLanguage === 'python' ? 'Python · Lezer' : 'JavaScript · Babel AST'}<span>·</span> UTF-8</span></footer>
+      </>}
+      {achievementToasts[0] && <div className="achievement-toast" role="status" aria-live="polite"><span className="achievement-toast__icon"><Trophy aria-hidden="true" /></span><span><small>LOGRO DESBLOQUEADO · +{achievementToasts[0].xp} XP</small><strong>{achievementToasts[0].name}</strong></span><button type="button" aria-label="Cerrar notificación" onClick={() => setAchievementToasts((current) => current.slice(1))}><X aria-hidden="true" /></button></div>}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
     </main>
   )
