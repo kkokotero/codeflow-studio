@@ -15,6 +15,8 @@
     "@babel/traverse": "^8.1.0",
     "@babel/types": "^8.1.0",
     "@base-ui/react": "^1.5.0",
+    "@lezer/python": "^1.1.19",
+    "@material/material-color-utilities": "^0.4.0",
     "@monaco-editor/react": "^4.7.0",
     "@vercel/analytics": "1.6.1",
     "@xyflow/react": "^12.12.1",

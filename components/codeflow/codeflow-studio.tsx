@@ -7,16 +7,17 @@ import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Braces, Check,
   ChevronDown, CircleDot, Clock3, Code2, Copy, FileCode2, FilePlus2, Folder,
   GitBranch, History, Import, Keyboard, ListTree, LoaderCircle, PanelRight,
-  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal,
+  Play, Plus, RotateCcw, Search, ShieldAlert, SkipBack, SkipForward, SlidersHorizontal,
   Square, Terminal, Trash2, Variable, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
+import { ColorThemeControls, useMaterialTheme } from '@/components/codeflow/color-theme-controls'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { analyzeCode } from '@/lib/diagram'
 import { starterFiles } from '@/lib/codeflow-examples'
-import { runtimeAdapters } from '@/lib/runtime-adapters'
-import type { CodeFile, Language, RunSnapshot, RunStatus, RuntimeMessage, SafeValue, TraceEntry } from '@/lib/codeflow-types'
+import { EXECUTION_DISABLED_LABEL, EXECUTION_DISABLED_NOTICE } from '@/lib/runtime-safety'
+import type { CodeFile, Language, RunSnapshot, RunStatus, SafeValue, TraceEntry } from '@/lib/codeflow-types'
 
 const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
   ssr: false,
@@ -24,7 +25,7 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
 })
 
 const languageNames: Record<Language, string> = { javascript: 'JavaScript', python: 'Python' }
-const runtimeNames: Record<Language, string> = { javascript: runtimeAdapters.javascript.label, python: runtimeAdapters.python.label }
+const runtimeNames: Record<Language, string> = { javascript: 'Análisis estático', python: 'Análisis estático' }
 
 type InspectorTab = 'variables' | 'stack' | 'history'
 type BottomTab = 'console' | 'trace'
@@ -51,6 +52,7 @@ function getExtension(name: string): Language {
 }
 
 export function CodeflowStudio() {
+  const { mode, setMode, seed, setSeed, isDark } = useMaterialTheme()
   const [files, setFiles] = useState<CodeFile[]>(starterFiles)
   const [activeFileId, setActiveFileId] = useState(starterFiles[0].id)
   const [status, setStatus] = useState<RunStatus>('idle')
@@ -73,19 +75,12 @@ export function CodeflowStudio() {
   const [mobilePane, setMobilePane] = useState<'editor' | 'diagram' | 'inspector'>('editor')
   const [isImporting, setIsImporting] = useState(false)
   const [fileFilter, setFileFilter] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(EXECUTION_DISABLED_NOTICE)
   const [showHelp, setShowHelp] = useState(false)
-  const [runtimeReady, setRuntimeReady] = useState(false)
-  const workerRef = useRef<Worker | null>(null)
-  const timeoutRef = useRef<number | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const decorationIdsRef = useRef<string[]>([])
-  const traceBufferRef = useRef<TraceEntry[]>([])
-  const logBufferRef = useRef<string[]>([])
-  const runFailedRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileSearchRef = useRef<HTMLInputElement>(null)
-  const statusRef = useRef(status)
 
   const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
   const displayCode = historicalView?.code ?? activeFile.code
@@ -95,11 +90,14 @@ export function CodeflowStudio() {
   const currentStep = trace[activeStep] ?? null
   const isRuntimeBusy = status === 'running' || status === 'loading'
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? null
+  const activeOperation = currentStep?.operationId ? graph.nodes.find((node) => node.data.operationId === currentStep.operationId) ?? null : null
+  const visibleTrace = useMemo(() => {
+    const start = Math.max(0, Math.min(activeStep - 50, trace.length - 100))
+    return trace.slice(start, start + 100).map((step, index) => ({ step, index: start + index }))
+  }, [activeStep, trace])
   const sortedVariables = useMemo(() => Object.entries(currentStep?.locals ?? {}).sort(([left], [right]) => left.localeCompare(right)), [currentStep])
   const visibleVariables = useMemo(() => sortedVariables.filter(([name]) => name.toLowerCase().includes(variableQuery.trim().toLowerCase())), [sortedVariables, variableQuery])
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
-
-  useEffect(() => { statusRef.current = status }, [status])
 
   useEffect(() => {
     if (status !== 'complete' || !isPlaying || trace.length < 2) return
@@ -141,11 +139,6 @@ export function CodeflowStudio() {
     decorationIdsRef.current = editorRef.current.deltaDecorations(decorationIdsRef.current, decorations)
   }, [breakpoints, activeFileId, currentStep])
 
-  useEffect(() => () => {
-    workerRef.current?.terminate()
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-  }, [])
-
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
     setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, code } : file))
@@ -184,146 +177,19 @@ export function CodeflowStudio() {
         'editorIndentGuide.background1': '#202826',
       },
     })
-    editor.updateOptions({ theme: 'codeflow-graphite', glyphMargin: true, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
-    const listener = editor.onMouseDown((event) => {
+      monaco.editor.setTheme(isDark ? 'codeflow-graphite' : 'vs')
+      editor.updateOptions({ glyphMargin: true, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
+      const listener = editor.onMouseDown((event) => {
       if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || !event.target.position) return
       const line = event.target.position.lineNumber
       setBreakpoints((current) => current.includes(line) ? current.filter((item) => item !== line) : [...current, line].sort((a, b) => a - b))
     })
-  }, [])
-
-  const finishRun = useCallback((file: CodeFile) => {
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-    workerRef.current?.terminate()
-    workerRef.current = null
-    const savedSteps = [...traceBufferRef.current]
-    const savedLogs = [...logBufferRef.current]
-    setTrace(savedSteps)
-    setLogs(savedLogs)
-    if (!runFailedRef.current && savedSteps.length > 0) {
-      const snapshot: RunSnapshot = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fileId: file.id, fileName: file.name, language: file.language, code: file.code, createdAt: Date.now(), steps: savedSteps, output: savedLogs }
-      setSnapshots((current) => [snapshot, ...current].slice(0, 8))
-      setActiveStep(0)
-      setStatus('complete')
-      setIsPlaying(savedSteps.length > 1)
-      setNotice(`${savedSteps.length} pasos registrados · valores capturados durante la ejecución`)
-    } else if (!runFailedRef.current) {
-      setStatus('complete')
-      setIsPlaying(false)
-      setNotice('Ejecución finalizada · no se registraron instrucciones ejecutables')
-    }
-    setRuntimeReady(false)
-  }, [])
+  }, [isDark])
 
   const runCode = useCallback(() => {
-    if (historicalView) return
-    if (!activeFile.code.trim()) {
-      setStatus('error')
-      setNotice('El archivo está vacío. Agrega una instrucción antes de ejecutar.')
-      return
-    }
-    workerRef.current?.terminate()
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-    traceBufferRef.current = []
-    logBufferRef.current = []
-    runFailedRef.current = false
-    setTrace([])
-    setLogs([])
-    setActiveStep(-1)
-    setSelectedNodeId(null)
     setIsPlaying(false)
-    setRuntimeReady(false)
-    setStatus(activeFile.language === 'python' ? 'loading' : 'running')
-    setNotice(activeFile.language === 'python' ? 'Iniciando Python en WebAssembly…' : 'Ejecutando en un worker desechable…')
-
-    let worker: Worker
-    try {
-      worker = runtimeAdapters[activeFile.language].createWorker()
-    } catch (error) {
-      setStatus('error')
-      setNotice(error instanceof Error ? error.message : 'No se pudo iniciar el runtime.')
-      return
-    }
-    workerRef.current = worker
-    const adapter = runtimeAdapters[activeFile.language]
-    const initialTimeout = adapter.startupLimitMs
-    timeoutRef.current = window.setTimeout(() => {
-      runFailedRef.current = true
-      setStatus('error')
-      setNotice('Se agotó el límite de ejecución. El worker se detuvo para mantener el editor receptivo.')
-      worker.terminate()
-      workerRef.current = null
-      setRuntimeReady(false)
-    }, initialTimeout)
-
-    worker.onmessage = (event: MessageEvent<RuntimeMessage>) => {
-      const message = event.data
-      if (message.type === 'ready') {
-        setRuntimeReady(true)
-        setStatus('running')
-        setNotice('Ejecutando y capturando el estado real de cada instrucción…')
-        if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-        timeoutRef.current = window.setTimeout(() => {
-          runFailedRef.current = true
-          setStatus('error')
-          setNotice('Tiempo límite alcanzado. El worker se detuvo; revisa si hay un bucle infinito.')
-          worker.terminate()
-          workerRef.current = null
-          setRuntimeReady(false)
-        }, adapter.executionLimitMs)
-      } else if (message.type === 'step' && typeof message.line === 'number') {
-        const entry: TraceEntry = { id: traceBufferRef.current.length + 1, line: message.line, locals: message.locals ?? {}, stack: message.stack ?? [], ...(message.returnValue !== undefined ? { returnValue: message.returnValue } : {}) }
-        traceBufferRef.current.push(entry)
-        if (traceBufferRef.current.length <= 2000) {
-          setTrace([...traceBufferRef.current])
-          setActiveStep(traceBufferRef.current.length - 1)
-        }
-      } else if (message.type === 'console' && typeof message.value === 'string') {
-        logBufferRef.current.push(message.value)
-        setLogs([...logBufferRef.current].slice(-500))
-      } else if (message.type === 'error') {
-        runFailedRef.current = true
-        setStatus('error')
-        setIsPlaying(false)
-        setNotice(message.error ?? 'El programa terminó con un error.')
-        logBufferRef.current.push(`Error: ${message.error ?? 'Error de ejecución'}`)
-        setLogs([...logBufferRef.current].slice(-500))
-      } else if (message.type === 'done') {
-        finishRun(activeFile)
-      }
-    }
-    worker.onerror = (event) => {
-      runFailedRef.current = true
-      setStatus('error')
-      setNotice(event.message || 'El worker terminó inesperadamente.')
-      finishRun(activeFile)
-    }
-    worker.postMessage({ code: activeFile.code })
-  }, [activeFile, finishRun, historicalView])
-
-  const stopRun = useCallback(() => {
-    workerRef.current?.terminate()
-    workerRef.current = null
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-    setStatus('stopped')
-    setRuntimeReady(false)
-    setIsPlaying(false)
-    setNotice('Ejecución detenida por el usuario.')
-  }, [])
-
-  const resetExecution = useCallback(() => {
-    workerRef.current?.terminate()
-    workerRef.current = null
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current)
-    traceBufferRef.current = []
-    logBufferRef.current = []
-    setTrace([])
-    setLogs([])
-    setActiveStep(-1)
-    setStatus('idle')
-    setRuntimeReady(false)
-    setIsPlaying(false)
-    setNotice('Traza y consola reiniciadas.')
+    setBottomTab('console')
+    setNotice(EXECUTION_DISABLED_NOTICE)
   }, [])
 
   useEffect(() => {
@@ -331,7 +197,7 @@ export function CodeflowStudio() {
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.key === 'Enter') {
         event.preventDefault()
-        if (statusRef.current !== 'running' && statusRef.current !== 'loading') runCode()
+        runCode()
       } else if (event.key.toLowerCase() === 'p') {
         event.preventDefault()
         fileSearchRef.current?.focus()
@@ -480,7 +346,6 @@ export function CodeflowStudio() {
   }, [displayFileName, displayLanguage, graph, manualEdges])
 
   const clearConsole = useCallback(() => {
-    logBufferRef.current = []
     setLogs([])
   }, [])
 
@@ -512,6 +377,7 @@ export function CodeflowStudio() {
         <div className="topbar-divider" />
         <div className="project-crumb"><Folder aria-hidden="true" /><span>proyectos</span><ChevronDown aria-hidden="true" /><span className="crumb-separator">/</span><strong>algoritmos-visuales</strong><ChevronDown aria-hidden="true" /></div>
         <div className="topbar-spacer" />
+        <ColorThemeControls mode={mode} seed={seed} onModeChange={setMode} onSeedChange={setSeed} />
         <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
         <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => setShowHelp(true)}><Keyboard aria-hidden="true" /></Button>
         <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
@@ -546,12 +412,10 @@ export function CodeflowStudio() {
           <span className="file-title"><FileCode2 aria-hidden="true" />{displayFileName}</span>
         </div>
         <div className="toolbar-right">
-          {status === 'running' || status === 'loading' ? (
-            <Button variant="outline" size="sm" className="stop-button" onClick={stopRun}><Square data-icon="inline-start" aria-hidden="true" />Detener</Button>
-          ) : (
-            <Button size="sm" className="run-button" onClick={runCode} disabled={Boolean(historicalView)}><Play data-icon="inline-start" aria-hidden="true" />{historicalView ? 'Vista histórica' : 'Ejecutar'} <kbd>⌘ ↵</kbd></Button>
-          )}
-          {trace.length > 0 && !isRuntimeBusy && !historicalView && <Button variant="ghost" size="icon-sm" aria-label="Reiniciar ejecución" title="Reiniciar traza y consola" onClick={resetExecution}><RotateCcw aria-hidden="true" /></Button>}
+          <Button size="sm" className="run-button" disabled aria-describedby="execution-limit-note" title={EXECUTION_DISABLED_NOTICE}>
+            <ShieldAlert data-icon="inline-start" aria-hidden="true" />{EXECUTION_DISABLED_LABEL}
+          </Button>
+          <span id="execution-limit-note" className="sr-only">{EXECUTION_DISABLED_NOTICE}</span>
           <span className="toolbar-divider" />
           <Button variant="ghost" size="icon-sm" aria-label="Exportar archivo" title="Exportar archivo" onClick={exportActiveFile}><ArrowDownToLine aria-hidden="true" /></Button>
           <Button variant="ghost" size="icon-sm" aria-label="Exportar proyecto" title="Exportar proyecto CodeFlow" onClick={exportProject}><Folder aria-hidden="true" /></Button>
@@ -574,7 +438,7 @@ export function CodeflowStudio() {
             {filteredFiles.length === 0 && <div className="file-empty">No se encontraron archivos</div>}
           </div>
           <div className="files-actions"><Button variant="ghost" size="sm" onClick={addFile} disabled={isRuntimeBusy || Boolean(historicalView)}><Plus data-icon="inline-start" aria-hidden="true" />Nuevo archivo</Button><Button variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} aria-label="Importar archivos" title="Importar archivos" disabled={isRuntimeBusy}><Import aria-hidden="true" /></Button></div>
-          <div className="sidebar-bottom"><div className="sidebar-bottom__row"><GitBranch aria-hidden="true" /><span>main</span><span className="sidebar-bottom__status">sin guardar</span></div><div className="sidebar-bottom__row"><Activity aria-hidden="true" /><span>Runtime aislado</span><span className="sidebar-bottom__status is-ready">listo</span></div></div>
+          <div className="sidebar-bottom"><div className="sidebar-bottom__row"><GitBranch aria-hidden="true" /><span>main</span><span className="sidebar-bottom__status">sin guardar</span></div><div className="sidebar-bottom__row"><Activity aria-hidden="true" /><span>Análisis estático</span><span className="sidebar-bottom__status">activo</span></div></div>
         </aside>
 
         <section className={`editor-pane workspace-panel ${mobilePane === 'editor' ? 'mobile-active' : ''}`} aria-label="Editor de código">
@@ -590,7 +454,7 @@ export function CodeflowStudio() {
               value={displayCode}
               onChange={(value) => updateActiveCode(value ?? '')}
               onMount={handleEditorMount}
-              theme="vs-dark"
+              theme={isDark ? 'codeflow-graphite' : 'vs'}
               options={{ automaticLayout: true, glyphMargin: true, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, scrollBeyondLastLine: false, wordWrap: 'off', tabSize: displayLanguage === 'python' ? 4 : 2, insertSpaces: true, suggestOnTriggerCharacters: true, quickSuggestions: true, accessibilitySupport: 'auto', readOnly: isRuntimeBusy || Boolean(historicalView) }}
             />
           </div>
@@ -600,12 +464,12 @@ export function CodeflowStudio() {
         <section className={`diagram-pane workspace-panel ${mobilePane === 'diagram' ? 'mobile-active' : ''}`} aria-label="Diagrama del código">
           <div className="panel-titlebar diagram-titlebar">
             <div className="panel-title"><GitBranch aria-hidden="true" /><span>FLUJO</span><span className="node-count">{graph.nodes.length} nodos</span></div>
-            <div className="diagram-actions"><span className="live-indicator"><span />{trace.length ? 'TRAZA REAL' : 'ESTRUCTURA'}</span><Button variant="ghost" size="icon-xs" aria-label="Exportar diagrama JSON" title="Exportar diagrama JSON" onClick={exportDiagram}><ArrowDownToLine aria-hidden="true" /></Button></div>
+            <div className="diagram-actions"><span className="live-indicator"><span />ANÁLISIS ESTÁTICO</span><Button variant="ghost" size="icon-xs" aria-label="Exportar diagrama JSON" title="Exportar diagrama JSON" onClick={exportDiagram}><ArrowDownToLine aria-hidden="true" /></Button></div>
           </div>
           <div className="diagram-body">
-            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} onSelectNode={openLine} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
+            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} activeOperationId={currentStep?.operationId ?? null} onSelectNode={openLine} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
           </div>
-          <div className="diagram-footer"><span><span className="legend-swatch legend-swatch--function" />Función</span><span><span className="legend-swatch legend-swatch--condition" />Condición</span><span><span className="legend-swatch legend-swatch--variable" />Variable</span><span><span className="legend-swatch legend-swatch--event" />Evento</span><span className="diagram-footer__hint">Arrastra nodos · conecta para anotar</span></div>
+          <div className="diagram-footer"><span><span className="legend-shape legend-shape--terminator" />Inicio / fin</span><span><span className="legend-shape legend-shape--process" />Proceso</span><span><span className="legend-shape legend-shape--decision" />Decisión</span><span><span className="legend-shape legend-shape--io" />Entrada / salida</span><span><span className="legend-shape legend-shape--connector" />Conector</span><span className="diagram-footer__hint">Diagrama estático</span></div>
         </section>
 
         <aside className={`inspector-pane workspace-panel ${mobilePane === 'inspector' ? 'mobile-active' : ''}`} aria-label="Inspector">
@@ -618,29 +482,30 @@ export function CodeflowStudio() {
           <div className="inspector-content">
             {inspectorTab === 'variables' && <>
               <div className="inspect-context"><span className={`status-badge status-badge--${status}`}>{status === 'running' ? 'EN EJECUCIÓN' : status === 'loading' ? 'INICIANDO' : status === 'error' ? 'ERROR' : status === 'paused' ? 'PAUSADO' : trace.length ? 'PASO REGISTRADO' : 'EN ESPERA'}</span><span>{currentStep ? `Línea ${currentStep.line}` : 'Sin paso activo'}</span></div>
+              {currentStep?.operationId && currentStep.operationValue !== undefined && <div className="operation-value-card"><span>RESULTADO DE OPERACIÓN</span>{activeOperation?.data.expression && <code>{activeOperation.data.expression}</code>}<pre>{formatValue(currentStep.operationValue)}</pre></div>}
               <label className="variable-search"><Search aria-hidden="true" /><input value={variableQuery} onChange={(event) => setVariableQuery(event.target.value)} placeholder="Buscar variable..." aria-label="Buscar variables" /></label>
               {visibleVariables.length ? <div className="variable-list" role="list" aria-label="Variables del paso actual">
                 {visibleVariables.map(([name, value]) => <div className="variable-card" role="listitem" key={name}><div className="variable-card__top"><span className="variable-name">{name}</span><span className={`value-type value-type--${valueKind(value)}`}>{valueKind(value)}</span></div><pre className="variable-value">{formatValue(value)}</pre></div>)}
-              </div> : <div className="inspector-empty"><Variable aria-hidden="true" /><strong>{trace.length ? 'Sin variables visibles' : 'Estado vacío'}</strong><span>{trace.length ? 'Este paso no tiene variables locales.' : 'Ejecuta el código para inspeccionar valores reales.'}</span></div>}
+              </div> : <div className="inspector-empty"><Variable aria-hidden="true" /><strong>{trace.length ? 'Sin variables visibles' : 'Estado vacío'}</strong><span>{trace.length ? 'Este paso no tiene variables locales.' : 'Los valores en tiempo de ejecución no están disponibles; la ejecución está desactivada por seguridad.'}</span></div>}
               {currentStep?.returnValue !== undefined && <div className="return-value-card"><span>VALOR DE RETORNO</span><pre>{formatValue(currentStep.returnValue)}</pre></div>}
               {currentStep && <div className="memory-estimate"><span>Huella lógica del snapshot</span><strong>{formatBytes(new TextEncoder().encode(JSON.stringify(currentStep.locals)).length)}</strong><small>Estimación serializada, no uso real del heap.</small></div>}
-              <div className="inspector-footnote"><span className="inspector-pulse" />Snapshots tomados durante la ejecución</div>
+              <div className="inspector-footnote"><span className="inspector-pulse" />Sin valores dinámicos · análisis estático</div>
             </>}
             {inspectorTab === 'stack' && <>
               <div className="inspect-section-title">Pila de llamadas <span>{currentStep?.stack.length ?? 0}</span></div>
               {currentStep?.stack.length ? <div className="call-stack" role="list">{[...currentStep.stack].reverse().map((name, index) => <div className={`stack-row ${index === 0 ? 'is-current' : ''}`} role="listitem" key={`${name}-${index}`}><span className="stack-index">{String(index + 1).padStart(2, '0')}</span><Braces aria-hidden="true" /><span>{name}</span>{index === 0 && <span className="stack-current">actual</span>}</div>)}</div> : <div className="inspector-empty"><ListTree aria-hidden="true" /><strong>Sin llamadas activas</strong><span>La pila aparece en cada paso registrado.</span></div>}
-              <div className="runtime-note"><strong>Runtime:</strong> {runtimeNames[displayLanguage]}<br /><strong>Sesión:</strong> aislada en el navegador</div>
+              <div className="runtime-note"><strong>Modo:</strong> análisis estático<br /><strong>Ejecución:</strong> desactivada por seguridad</div>
             </>}
             {inspectorTab === 'history' && <>
               <div className="history-heading"><span>Últimas ejecuciones</span><span>{snapshots.length}/8</span></div>
-              <p className="history-instructions">Selecciona una ejecución para restaurar su estado o marca dos para comparar escenarios.</p>
+              <p className="history-instructions">El historial y la comparación de valores dinámicos están desactivados junto con la ejecución de código.</p>
               <div className="history-list">
                 {snapshots.length ? snapshots.map((snapshot, index) => <div className={`history-card ${selectedSnapshots.includes(snapshot.id) ? 'is-compared' : ''}`} key={snapshot.id}>
                   <button type="button" className="history-card__open" onClick={() => selectSnapshot(snapshot)} aria-label={`Abrir ejecución ${index + 1}`} disabled={isRuntimeBusy}>
                     <span className="history-card__index">{String(snapshots.length - index).padStart(2, '0')}</span><span className="history-card__details"><strong>{snapshot.fileName.split('/').at(-1)}</strong><span>{new Date(snapshot.createdAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · {snapshot.steps.length} pasos</span></span><ArrowRight aria-hidden="true" />
                   </button>
                   <button type="button" className="history-compare" onClick={() => toggleSnapshotSelection(snapshot.id)} aria-label={`${selectedSnapshots.includes(snapshot.id) ? 'Quitar' : 'Comparar'} ejecución ${index + 1}`} aria-pressed={selectedSnapshots.includes(snapshot.id)}><Check aria-hidden="true" /></button>
-                </div>) : <div className="inspector-empty"><Clock3 aria-hidden="true" /><strong>Aún no hay ejecuciones</strong><span>Ejecuta el programa para crear el primer snapshot.</span></div>}
+                </div>) : <div className="inspector-empty"><Clock3 aria-hidden="true" /><strong>Ejecución desactivada</strong><span>No se generan snapshots ni valores de ejecución.</span></div>}
               </div>
               {comparedSnapshots.length === 2 && <SnapshotComparison snapshots={comparedSnapshots} />}
             </>}
@@ -670,11 +535,11 @@ export function CodeflowStudio() {
           </div>
         </div>
         {bottomTab === 'console' ? <div className="console-body" role="log" aria-live="polite" aria-label="Salida de consola">
-          {logs.length ? logs.map((line, index) => <div className={`console-line ${line.startsWith('Error:') ? 'console-line--error' : ''}`} key={`${index}-${line}`}><span className="console-prompt">›</span><span>{line}</span></div>) : <div className="console-empty"><span>$</span> La salida de <code>console.log</code> y <code>print</code> aparecerá aquí.</div>}
+          {logs.length ? logs.map((line, index) => <div className={`console-line ${line.startsWith('Error:') ? 'console-line--error' : ''}`} key={`${index}-${line}`}><span className="console-prompt">›</span><span>{line}</span></div>) : <div className="console-empty"><ShieldAlert aria-hidden="true" /> La ejecución de código está desactivada por seguridad. Solo se genera el diagrama estático.</div>}
         </div> : <div className="trace-body">
-          <div className="trace-progress" role="progressbar" aria-label="Progreso del registro" aria-valuemin={0} aria-valuemax={Math.max(trace.length - 1, 0)} aria-valuenow={Math.max(activeStep, 0)}><span style={{ width: `${trace.length > 1 ? Math.max(0, activeStep) / (trace.length - 1) * 100 : 0}%` }} /></div>
-          <div className="trace-summary"><span className="trace-summary__step">{trace.length ? `PASO ${String(Math.max(activeStep + 1, 1)).padStart(2, '0')} / ${String(trace.length).padStart(2, '0')}` : 'SIN REGISTRO'}</span><span className="trace-summary__line">{currentStep ? `Línea ${currentStep.line} · ${displayFileName}` : status === 'loading' ? 'Cargando runtime…' : 'Ejecuta el programa para registrar pasos'}</span><span className="trace-summary__origin">{trace.length ? 'valores reales · captura instrumentada' : 'instrumentación AST'}</span></div>
-          {trace.length > 0 && <div className="trace-ticks" aria-label="Pasos capturados">{trace.slice(0, 100).map((step, index) => <button key={step.id} type="button" aria-label={`Ir al paso ${step.id}, línea ${step.line}`} title={`Paso ${step.id} · línea ${step.line}`} className={`trace-tick ${index === activeStep ? 'is-active' : ''} ${breakpoints.includes(step.line) ? 'has-breakpoint' : ''}`} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(index) }} />)}</div>}
+          <input className="trace-scrubber" type="range" min={0} max={Math.max(trace.length - 1, 0)} step={1} value={Math.max(activeStep, 0)} disabled={!trace.length || isRuntimeBusy} aria-label="Buscar paso de ejecución" aria-valuetext={currentStep ? `Paso ${activeStep + 1} de ${trace.length} · línea ${currentStep.line}` : 'Sin pasos registrados'} onChange={(event) => { setIsPlaying(false); setStatus('paused'); setActiveStep(Number(event.currentTarget.value)) }} />
+          <div className="trace-summary"><span className="trace-summary__step">{trace.length ? `PASO ${String(Math.max(activeStep + 1, 1)).padStart(2, '0')} / ${String(trace.length).padStart(2, '0')}` : 'SIN REGISTRO'}</span><span className="trace-summary__line">{currentStep ? `Línea ${currentStep.line} · ${displayFileName}` : 'No hay traza: la ejecución está desactivada'}</span><span className="trace-summary__origin">{currentStep?.operationId ? 'resultado de operación' : 'solo estructura estática'}</span></div>
+          {visibleTrace.length > 0 && <div className="trace-ticks" aria-label="Pasos capturados">{visibleTrace.map(({ step, index }) => <button key={step.id} type="button" aria-label={step.operationId ? `Ir a la operación ${step.id}, línea ${step.line}` : `Ir al paso ${step.id}, línea ${step.line}`} title={step.operationId ? `Operación ${step.id} · línea ${step.line}` : `Paso ${step.id} · línea ${step.line}`} className={`trace-tick ${index === activeStep ? 'is-active' : ''} ${breakpoints.includes(step.line) ? 'has-breakpoint' : ''}`} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(index) }} />)}</div>}
         </div>}
       </section>
 
@@ -684,7 +549,7 @@ export function CodeflowStudio() {
         <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} onClick={() => setMobilePane('inspector')}><PanelRight aria-hidden="true" />Inspector</button>
       </nav>
 
-      <footer className="statusbar"><span><span className={`statusbar-dot statusbar-dot--${status}`} />{status === 'running' ? 'ejecutando' : status === 'loading' ? 'iniciando runtime' : status === 'error' ? 'ejecución fallida' : status === 'paused' ? 'reproducción pausada' : status === 'stopped' ? 'detenido' : 'listo'}</span><span>{runtimeReady ? 'worker activo' : 'worker aislado'}</span><span>{graph.nodes.length} elementos estructurales</span><span className="statusbar-right">{displayLanguage === 'python' ? 'Python 3 · Pyodide' : 'JavaScript · Babel AST'}<span>·</span> UTF-8</span></footer>
+      <footer className="statusbar"><span><span className="statusbar-dot statusbar-dot--idle" />Análisis estático</span><span>Ejecución desactivada</span><span>{graph.nodes.length} símbolos de flujo</span><span className="statusbar-right">{displayLanguage === 'python' ? 'Python · Lezer' : 'JavaScript · Babel AST'}<span>·</span> UTF-8</span></footer>
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
     </main>
   )
