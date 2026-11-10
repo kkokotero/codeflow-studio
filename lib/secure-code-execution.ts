@@ -172,6 +172,54 @@ async function ensureDirectory(sandbox: SandboxInstance, signal: AbortSignal) {
   if (result.exitCode !== 0) throw new Error('No se pudo preparar el directorio de ejecución.')
 }
 
+const MAX_APT_RETRIES = 3
+const APT_RETRY_DELAY_MS = 5000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function runAptCommand(
+  sandbox: SandboxInstance,
+  command: string,
+  signal: AbortSignal,
+  output: OutputCapture,
+  timeoutMs: number,
+): Promise<void> {
+  let lastError: Error | undefined
+
+  for (let attempt = 1; attempt <= MAX_APT_RETRIES; attempt++) {
+    if (signal.aborted) throw new Error('Operación cancelada.')
+
+    output.append(
+      'stderr',
+      `[apt] Intento ${attempt}/${MAX_APT_RETRIES}: ${command}\n`,
+    )
+
+    try {
+      await sandbox.runCommand({
+        cmd: 'bash',
+        args: ['-lc', command],
+        sudo: true,
+        timeoutMs,
+        signal,
+      })
+      return
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      output.append(
+        'stderr',
+        `[apt] Intento ${attempt} falló: ${lastError.message}\n`,
+      )
+      if (attempt < MAX_APT_RETRIES) {
+        await sleep(APT_RETRY_DELAY_MS)
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Comando apt falló sin error detallado.')
+}
+
 async function ensureToolchain(
   sandbox: SandboxInstance,
   language: Language,
@@ -195,21 +243,36 @@ async function ensureToolchain(
     return
   }
 
-  const packages = plan.installPackages.join(' ')
-  const install = await sandbox.runCommand({
-    cmd: 'bash',
-    args: ['-lc', `set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq --no-install-recommends ${packages}`],
-    sudo: true,
-    timeoutMs: MAX_TOOLCHAIN_INSTALL_TIME_MS,
+  // Configurar DNS dentro del sandbox antes de tocar los repositorios.
+  // Algunos entornos de sandbox no resuelven nombres vía systemd-resolved
+  // (127.0.0.53); usar 8.8.8.8 directamente evita fallos de resolución.
+  await runAptCommand(
+    sandbox,
+    'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
     signal,
-  })
-  if (install.exitCode !== 0) {
-    const text = await readCommandText(install)
-    if (text.stdout.trim()) output.append('stdout', text.stdout)
-    if (text.stderr.trim()) output.append('stderr', text.stderr)
-    throw new Error(`No se pudo preparar el runtime del lenguaje seleccionado${packages ? ` (${packages})` : ''}.`)
-  }
+    output,
+    10_000,
+  )
 
+  const packages = plan.installPackages.join(' ')
+
+  // apt-get update con reintentos
+  await runAptCommand(
+    sandbox,
+    `export DEBIAN_FRONTEND=noninteractive; apt-get update -qq`,
+    signal,
+    output,
+    MAX_TOOLCHAIN_INSTALL_TIME_MS,
+  )
+
+  // apt-get install con reintentos
+  await runAptCommand(
+    sandbox,
+    `export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq --no-install-recommends ${packages}`,
+    signal,
+    output,
+    MAX_TOOLCHAIN_INSTALL_TIME_MS,
+  )
   entry.toolchainsReady.add(key)
 }
 
