@@ -4,11 +4,12 @@ import { useCallback, useState } from 'react'
 
 import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { Button } from '@/components/ui/button'
+import { ConsoleTerminal } from '@/components/codeflow/console-terminal'
 import type { ExecutionOutput, RunStatus } from '@/lib/codeflow-types'
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   idle: 'En espera',
-  loading: 'Creando microVM',
+  loading: 'Preparando',
   running: 'En ejecución',
   paused: 'En pausa',
   complete: 'Completado',
@@ -29,14 +30,20 @@ interface ConsolePanelProps {
   onClear: () => void
   /** Avisa de que la salida se copió, para registrar el progreso. */
   onCopy?: () => void
+  /** Texto que pide el programa por la entrada estándar. */
+  inputPrompt?: string | null
+  /** Envía una línea a la entrada estándar del programa. */
+  onSendInput?: (line: string) => void
+  /** El usuario ha pedido detener el programa. */
+  onInterrupt?: () => void
 }
 
 /**
- * Consola de salida del proceso.
+ * Consola real del programa.
  *
- * Es el único panel de resultados: stdout y stderr con su marca de canal, el
- * estado de la última ejecución y dos acciones que hacen algo real (copiar y
- * limpiar). Nada de controles que nunca reciben datos.
+ * La salida vive en una terminal de verdad: se ve mientras llega y lo que se
+ * teclea va a la entrada estándar del proceso, que es lo que permite negociar
+ * con un programa que pregunta datos.
  */
 export function ConsolePanel({
   logs,
@@ -48,6 +55,9 @@ export function ConsolePanel({
   onToggleCollapsed,
   onClear,
   onCopy,
+  inputPrompt,
+  onSendInput,
+  onInterrupt,
 }: ConsolePanelProps) {
   const [copied, setCopied] = useState(false)
 
@@ -80,7 +90,7 @@ export function ConsolePanel({
           <APP_ICONS.console aria-hidden="true" className="cf-icon" />
           <span className="cf-console__title">Consola</span>
           <span className={`cf-status-dot cf-status-dot--${status}`} aria-hidden="true" />
-          <span className="cf-console__status">{STATUS_LABEL[status]}</span>
+          <span className={`cf-console__status`}>{STATUS_LABEL[status]}</span>
           <APP_ICONS.chevronDown aria-hidden="true" className={`cf-console__chevron ${collapsed ? 'is-collapsed' : ''}`} />
         </button>
         <div className="cf-console__actions">
@@ -118,17 +128,16 @@ export function ConsolePanel({
         </div>
       </header>
       {!collapsed && (
-        <>
-          <div className="cf-console__body" role="log" aria-live="polite" aria-label="Salida del programa">
-            {runNotice ? <p className="cf-console__system">{runNotice}</p> : null}
-            {logs.length ? (
-            logs.map((entry, index) => (
-              <div className={`cf-console__line ${entry.stream === 'stderr' ? 'is-error' : ''}`} key={`${index}-${entry.stream}`}>
-                <span className="cf-console__prompt" aria-hidden="true">{entry.stream === 'stderr' ? '!' : '›'}</span>
-                <span className="cf-console__text">{entry.text}</span>
-              </div>
-            ))
-          ) : (
+        <div className="cf-console__body">
+          <ConsoleTerminal
+            logs={logs}
+            runNotice={runNotice}
+            inputPrompt={inputPrompt}
+            onSendInput={onSendInput}
+            onInterrupt={onInterrupt}
+            onCopy={() => void copyOutput()}
+          />
+          {!logs.length && status !== 'running' && (
             <p className="cf-console__empty">
               {status === 'complete'
                 ? 'La ejecución terminó sin escribir en la salida estándar.'
@@ -137,8 +146,7 @@ export function ConsolePanel({
                   : 'Ejecuta el archivo para ver aquí stdout y stderr.'}
             </p>
           )}
-          </div>
-        </>
+        </div>
       )}
     </section>
   )

@@ -1957,20 +1957,35 @@
 .cf-console__actions { display: flex; align-items: center; gap: 2px; }
 
 .cf-console__body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 9px 13px 12px;
   background: var(--cf-surface-canvas);
   color: var(--cf-text-muted);
   font: var(--cf-text-sm)/1.7 var(--cf-font-mono);
 }
 
-.cf-console__line { display: flex; gap: 9px; min-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cf-console__prompt { flex: 0 0 auto; color: var(--cf-accent); }
-.cf-console__text { min-width: 0; }
-.cf-console__line.is-error { color: var(--cf-danger); }
-.cf-console__line.is-error .cf-console__prompt { color: var(--cf-danger); }
+/* Terminal: xterm.js con los mismos colores que el editor de código. */
+.cf-terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 2px 0 0;
+  overflow: hidden;
+  background: var(--md-sys-color-surface-container-lowest, #0e1212);
+}
+
+.cf-terminal .xterm { height: 100%; }
+/* xterm pinta la ventana de negro: aquí se deja ver el fondo de la tarjeta. */
+.cf-terminal .xterm .xterm-viewport { overflow-y: auto; background-color: transparent; }
+.cf-terminal .xterm .xterm-screen { background: transparent !important; }
+.cf-terminal .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.cf-terminal .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.cf-terminal .xterm-viewport::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--cf-line-strong); opacity: 0.6; }
+.cf-terminal .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--cf-text-subtle); }
 
 .cf-console__empty {
   margin: 0;

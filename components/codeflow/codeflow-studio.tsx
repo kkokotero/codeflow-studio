@@ -12,6 +12,8 @@ import { ConsolePanel } from '@/components/codeflow/console-panel'
 import { DiagramExportDialog, ProjectExportDialog } from '@/components/codeflow/export-dialogs'
 import { FileTree, type FileTreeActions } from '@/components/codeflow/file-tree'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
+import { readAppPalette, withAlpha, withoutHash } from '@/lib/app-palette'
+import { prepareLocalCode, runLocally, type LocalRuntimeHandle } from '@/lib/local-runtime'
 import { FlowNodeEditor } from '@/components/codeflow/flow-node-editor'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { HomeView } from '@/components/codeflow/home-view'
@@ -88,6 +90,9 @@ const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
 
 const achievementStorageKey = 'codeflow-achievements-v1'
 const layoutStorageKey = 'codeflow-layout-v1'
+
+/** Tope de tamaño de una sección: la deja crecer sin estorbar. */
+const MAX_SECTION_SIZE = 4000
 
 type MonacoInstance = Parameters<OnMount>[1]
 type InspectorTab = 'symbols' | 'history'
@@ -180,41 +185,32 @@ function clamp(value: number, min: number, max: number): number {
  * que el editor y la interfaz compartan la misma paleta.
  */
 function defineEditorThemes(monaco: MonacoInstance, isDark: boolean) {
-  const styles = getComputedStyle(document.documentElement)
+  const palette = readAppPalette()
   // Monaco exige el color de los tokens sin almohadilla y el de los fondos con ella.
-  const token = (name: string, fallback: string) => {
-    const value = styles.getPropertyValue(name).trim().replace(/^#/, '')
-    return /^[0-9a-f]{6}$/i.test(value) ? value : fallback
-  }
-  const color = (name: string, fallback: string) => {
-    const value = styles.getPropertyValue(name).trim()
-    return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback
-  }
+  const token = (color: string) => withoutHash(color)
   const rules = [
-    { token: 'keyword', foreground: token('--md-sys-color-tertiary', 'c5a6ff') },
-    { token: 'string', foreground: token('--md-sys-color-secondary', 'b6d68a') },
-    { token: 'number', foreground: token('--md-sys-color-primary', 'e7b56b') },
-    { token: 'comment', foreground: token('--md-sys-color-on-surface-variant', '66736e'), fontStyle: 'italic' },
-    { token: 'type', foreground: token('--md-sys-color-primary-container', 'a5c99a') },
-    { token: 'function', foreground: token('--md-sys-color-primary', 'e7b56b') },
+    { token: 'keyword', foreground: token(palette.tertiary) },
+    { token: 'string', foreground: token(palette.secondary) },
+    { token: 'number', foreground: token(palette.primary) },
+    { token: 'comment', foreground: token(palette.muted), fontStyle: 'italic' },
+    { token: 'type', foreground: token(palette.primaryContainer) },
+    { token: 'function', foreground: token(palette.primary) },
   ]
-  const canvas = color('--md-sys-color-surface-container-lowest', '#0e1212')
-  const raised = color('--md-sys-color-surface-container-low', '#141a1a')
 
   monaco.editor.defineTheme('codeflow-graphite', {
     base: 'vs-dark',
     inherit: true,
     rules,
     colors: {
-      'editor.background': canvas,
-      'editor.foreground': color('--md-sys-color-on-surface', '#dde4e0'),
-      'editorLineNumber.foreground': color('--md-sys-color-outline', '#6d7976'),
-      'editorLineNumber.activeForeground': color('--md-sys-color-on-surface-variant', '#b4c0bb'),
-      'editorCursor.foreground': color('--md-sys-color-primary', '#bdff82'),
-      'editor.selectionBackground': `${color('--md-sys-color-primary', '#bdff82')}44`,
-      'editor.lineHighlightBackground': raised,
-      'editorGutter.background': canvas,
-      'editorIndentGuide.background1': color('--md-sys-color-outline-variant', '#202826'),
+      'editor.background': palette.canvas,
+      'editor.foreground': palette.text,
+      'editorLineNumber.foreground': palette.outline,
+      'editorLineNumber.activeForeground': palette.muted,
+      'editorCursor.foreground': palette.primary,
+      'editor.selectionBackground': withAlpha(palette.primary, '44'),
+      'editor.lineHighlightBackground': palette.raised,
+      'editorGutter.background': palette.canvas,
+      'editorIndentGuide.background1': palette.outlineVariant,
     },
   })
 
@@ -223,14 +219,15 @@ function defineEditorThemes(monaco: MonacoInstance, isDark: boolean) {
     inherit: true,
     rules,
     colors: {
-      'editor.background': canvas,
-      'editor.foreground': color('--md-sys-color-on-surface', '#1a211c'),
-      'editorLineNumber.foreground': color('--md-sys-color-outline', '#727970'),
-      'editorLineNumber.activeForeground': color('--md-sys-color-on-surface-variant', '#424a43'),
-      'editorCursor.foreground': color('--md-sys-color-primary', '#386b4f'),
-      'editor.lineHighlightBackground': raised,
-      'editorGutter.background': canvas,
-      'editorIndentGuide.background1': color('--md-sys-color-outline-variant', '#c4cbc4'),
+      'editor.background': palette.canvas,
+      'editor.foreground': palette.text,
+      'editorLineNumber.foreground': palette.outline,
+      'editorLineNumber.activeForeground': palette.muted,
+      'editorCursor.foreground': palette.primary,
+      'editor.selectionBackground': withAlpha(palette.primary, '44'),
+      'editor.lineHighlightBackground': palette.raised,
+      'editorGutter.background': palette.canvas,
+      'editorIndentGuide.background1': palette.outlineVariant,
     },
   })
 
@@ -255,6 +252,8 @@ export function CodeflowStudio() {
   const [isImporting, setIsImporting] = useState(false)
   const [fileFilter, setFileFilter] = useState('')
   const [notice, setNotice] = useState('')
+  /** Texto que pide el programa por la entrada estándar. */
+  const [inputPrompt, setInputPrompt] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' })
   const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
@@ -263,6 +262,8 @@ export function CodeflowStudio() {
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<MonacoInstance | null>(null)
   const executionAbortRef = useRef<AbortController | null>(null)
+  /** Ejecución local en el navegador, con entrada estándar abierta. */
+  const localRuntimeRef = useRef<LocalRuntimeHandle | null>(null)
   const decorationIdsRef = useRef<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -508,18 +509,97 @@ export function CodeflowStudio() {
     if (monacoRef.current) applyEditorTheme(monacoRef.current)
   }, [applyEditorTheme])
 
-  const runCode = useCallback(async () => {
-    if (historicalView || !activeFile) return
+  /** Cierra la ejecución: historial, progreso y avisos. */
+  const finishExecution = useCallback((file: CodeFile, result: {
+    output: ExecutionOutput[]
+    exitCode: number
+    durationMs: number
+    timedOut: boolean
+    outputTruncated: boolean
+  }) => {
+    const output = result.output.length ? result.output : result.timedOut
+      ? [{ stream: 'stderr' as const, text: `Tiempo límite de ${MAX_EXECUTION_TIME_MS / 1_000} s alcanzado.` }]
+      : result.outputTruncated
+        ? [{ stream: 'stderr' as const, text: 'La salida superó el límite y el proceso fue detenido.' }]
+        : result.exitCode !== 0
+          ? [{ stream: 'stderr' as const, text: `El proceso terminó con código ${result.exitCode}.` }]
+          : []
+    setLogs(output)
+    const snapshot: RunSnapshot = {
+      id: crypto.randomUUID(),
+      fileId: file.id,
+      fileName: file.name,
+      language: file.language,
+      code: file.code,
+      createdAt: Date.now(),
+      output,
+    }
+    setSnapshots((current) => [snapshot, ...current].slice(0, 8))
+    setSelectedSnapshots([])
 
-    const sourceBytes = new TextEncoder().encode(activeFile.code).byteLength
-    if (sourceBytes > MAX_EXECUTION_SOURCE_BYTES) {
-      const message = `El código supera el límite de ${Math.round(MAX_EXECUTION_SOURCE_BYTES / 1_000)} KB.`
-      setStatus('error')
-      setLogs([{ stream: 'stderr', text: message }])
-      setNotice(message)
+    const failed = result.exitCode !== 0 || result.timedOut || result.outputTruncated
+    setStatus(failed ? 'error' : 'complete')
+    if (failed) recordProgress({ type: 'run-failure' })
+    else {
+      const executionGraph = analyzeCode(file.code, file.language)
+      recordProgress({
+        type: 'run-success',
+        language: file.language,
+        output: output.filter((entry) => entry.stream === 'stdout').map((entry) => entry.text).join('\n'),
+        nodeCount: executionGraph.nodes.length,
+        nodeKinds: executionGraph.nodes.map((node) => node.data.kind),
+        code: file.code,
+      })
+    }
+    if (result.timedOut) setNotice(`Tiempo límite alcanzado · ${MAX_EXECUTION_TIME_MS / 1_000} s · proceso detenido.`)
+    else if (result.outputTruncated) setNotice(`Salida limitada a ${Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB · proceso detenido.`)
+    else if (result.exitCode !== 0) setNotice(`El proceso terminó con código ${result.exitCode} · revisa stderr.`)
+    else setNotice(`Ejecución completada en ${(result.durationMs / 1_000).toFixed(2)} s.`)
+  }, [recordProgress])
+
+  /**
+   * Ejecución en el navegador: el programa corre en un worker y la consola
+   * muestra su salida en vivo. Nada sale del equipo.
+   */
+  const runInBrowser = useCallback((file: CodeFile) => {
+    let prepared: string
+    try {
+      prepared = prepareLocalCode(file.language, file.code)
+    } catch {
+      setNotice('El archivo no se puede preparar para el navegador; se usa el entorno aislado.')
+      void runRemote(file)
       return
     }
 
+    setStatus('running')
+    setLogs([])
+    setInputPrompt(null)
+    setNotice('Ejecutando en el navegador…')
+
+    const handle = runLocally({
+      code: prepared,
+      language: file.language,
+      onOutput: (chunk) => {
+        setLogs((current) => {
+          const last = current.at(-1)
+          if (last && last.stream === chunk.stream) {
+            return [...current.slice(0, -1), { stream: chunk.stream, text: last.text + chunk.text }]
+          }
+          return [...current, { stream: chunk.stream, text: chunk.text }]
+        })
+      },
+      onInputRequest: (prompt) => setInputPrompt(prompt),
+      onExit: (result) => {
+        localRuntimeRef.current = null
+        setInputPrompt(null)
+        finishExecution(file, result)
+      },
+    })
+    localRuntimeRef.current = handle
+  }, [finishExecution])
+
+  /** Ejecución aislada en el servidor, para los lenguajes que no son JavaScript. */
+  const runRemote = useCallback(async (file: CodeFile) => {
     const controller = new AbortController()
     executionAbortRef.current = controller
     setStatus('loading')
@@ -530,7 +610,7 @@ export function CodeflowStudio() {
       const response = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: activeFile.language, code: activeFile.code }),
+        body: JSON.stringify({ language: file.language, code: file.code }),
         signal: controller.signal,
       })
       const payload: unknown = await response.json().catch(() => null)
@@ -550,45 +630,7 @@ export function CodeflowStudio() {
         outputTruncated: boolean
       }
       if (!Array.isArray(result.output) || typeof result.exitCode !== 'number') throw new Error('Respuesta de ejecución no válida.')
-
-      const output = result.output.length ? result.output : result.timedOut
-        ? [{ stream: 'stderr' as const, text: `Tiempo límite de ${MAX_EXECUTION_TIME_MS / 1_000} s alcanzado.` }]
-        : result.outputTruncated
-          ? [{ stream: 'stderr' as const, text: 'La salida superó el límite y el proceso fue detenido.' }]
-          : result.exitCode !== 0
-            ? [{ stream: 'stderr' as const, text: `El proceso terminó con código ${result.exitCode}.` }]
-            : []
-      setLogs(output)
-      const snapshot: RunSnapshot = {
-        id: crypto.randomUUID(),
-        fileId: activeFile.id,
-        fileName: activeFile.name,
-        language: activeFile.language,
-        code: activeFile.code,
-        createdAt: Date.now(),
-        output,
-      }
-      setSnapshots((current) => [snapshot, ...current].slice(0, 8))
-      setSelectedSnapshots([])
-
-      const failed = result.exitCode !== 0 || result.timedOut || result.outputTruncated
-      setStatus(failed ? 'error' : 'complete')
-      if (failed) recordProgress({ type: 'run-failure' })
-      else {
-        const executionGraph = analyzeCode(activeFile.code, activeFile.language)
-        recordProgress({
-          type: 'run-success',
-          language: activeFile.language,
-          output: output.filter((entry) => entry.stream === 'stdout').map((entry) => entry.text).join('\n'),
-          nodeCount: executionGraph.nodes.length,
-          nodeKinds: executionGraph.nodes.map((node) => node.data.kind),
-          code: activeFile.code,
-        })
-      }
-      if (result.timedOut) setNotice(`Tiempo límite alcanzado · ${MAX_EXECUTION_TIME_MS / 1_000} s · proceso detenido.`)
-      else if (result.outputTruncated) setNotice(`Salida limitada a ${Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB · proceso detenido.`)
-      else if (result.exitCode !== 0) setNotice(`El proceso terminó con código ${result.exitCode} · revisa stderr.`)
-      else setNotice(`Ejecución completada en ${(result.durationMs / 1_000).toFixed(2)} s.`)
+      finishExecution(file, result)
     } catch (error) {
       const cancelled = controller.signal.aborted
       const message = cancelled
@@ -600,7 +642,37 @@ export function CodeflowStudio() {
     } finally {
       if (executionAbortRef.current === controller) executionAbortRef.current = null
     }
-  }, [activeFile, historicalView, recordProgress])
+  }, [finishExecution])
+
+  const runCode = useCallback(async () => {
+    if (historicalView || !activeFile) return
+
+    const sourceBytes = new TextEncoder().encode(activeFile.code).byteLength
+    if (sourceBytes > MAX_EXECUTION_SOURCE_BYTES) {
+      const message = `El código supera el límite de ${Math.round(MAX_EXECUTION_SOURCE_BYTES / 1_000)} KB.`
+      setStatus('error')
+      setLogs([{ stream: 'stderr', text: message }])
+      setNotice(message)
+      return
+    }
+
+    // JavaScript y TypeScript se ejecutan en el navegador: la consola es
+    // interactiva y nada sale del equipo.
+    if (activeFile.language === 'javascript' || activeFile.language === 'typescript') {
+      runInBrowser(activeFile)
+      return
+    }
+
+    await runRemote(activeFile)
+  }, [activeFile, historicalView, runInBrowser, runRemote])
+
+  /** Escribe una línea en la entrada estándar del programa en marcha. */
+  const sendConsoleInput = useCallback((line: string) => {
+    const handle = localRuntimeRef.current
+    if (!handle) return
+    handle.write(line)
+    setInputPrompt(null)
+  }, [])
 
   const cancelExecution = useCallback(() => {
     executionAbortRef.current?.abort()
@@ -1392,8 +1464,8 @@ export function CodeflowStudio() {
                 <ResizeHandle
                   orientation="vertical"
                   label="Ajustar el ancho del explorador"
-                  onResize={(delta) => resizeSection('files', delta, 160, 460)}
-                  onNudge={(delta) => updateLayout({ files: delta === 0 ? DEFAULT_LAYOUT.files : clamp(layout.files + delta, 160, 460) })}
+                  onResize={(delta) => resizeSection('files', delta, 160, MAX_SECTION_SIZE)}
+                  onNudge={(delta) => updateLayout({ files: delta === 0 ? DEFAULT_LAYOUT.files : clamp(layout.files + delta, 160, MAX_SECTION_SIZE) })}
                   onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
                 />
 </>
@@ -1496,8 +1568,8 @@ export function CodeflowStudio() {
                 <ResizeHandle
                   orientation="vertical"
                   label="Ajustar el ancho del editor"
-                  onResize={(delta) => resizeSection('editor', delta, 260, 1400)}
-                  onNudge={(delta) => updateLayout({ editor: delta === 0 ? DEFAULT_LAYOUT.editor : clamp(layout.editor + delta, 260, 1400) })}
+                  onResize={(delta) => resizeSection('editor', delta, 260, MAX_SECTION_SIZE)}
+                  onNudge={(delta) => updateLayout({ editor: delta === 0 ? DEFAULT_LAYOUT.editor : clamp(layout.editor + delta, 260, MAX_SECTION_SIZE) })}
                   onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
                 />
 </>
@@ -1563,8 +1635,8 @@ export function CodeflowStudio() {
                 <ResizeHandle
                   orientation="vertical"
                   label="Ajustar el ancho del inspector"
-                  onResize={(delta) => resizeSection('inspector', -delta, 200, 520)}
-                  onNudge={(delta) => updateLayout({ inspector: delta === 0 ? DEFAULT_LAYOUT.inspector : clamp(layout.inspector - delta, 200, 520) })}
+                  onResize={(delta) => resizeSection('inspector', -delta, 200, MAX_SECTION_SIZE)}
+                  onNudge={(delta) => updateLayout({ inspector: delta === 0 ? DEFAULT_LAYOUT.inspector : clamp(layout.inspector - delta, 200, MAX_SECTION_SIZE) })}
                   onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
                 />
 </>
@@ -1672,9 +1744,9 @@ export function CodeflowStudio() {
                     setSectionClosed('console', true)
                     return
                   }
-                  updateLayout({ console: clamp(next, 80, 520) })
+                  updateLayout({ console: clamp(next, 80, MAX_SECTION_SIZE) })
                 }}
-                onNudge={(delta) => updateLayout({ console: delta === 0 ? DEFAULT_LAYOUT.console : clamp(layout.console - delta, 80, 520) })}
+                onNudge={(delta) => updateLayout({ console: delta === 0 ? DEFAULT_LAYOUT.console : clamp(layout.console - delta, 80, MAX_SECTION_SIZE) })}
                 onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
               />
 
@@ -1687,6 +1759,9 @@ export function CodeflowStudio() {
                 onToggleCollapsed={() => updateLayout({ consoleCollapsed: !consoleCollapsed })}
                 onClear={clearConsole}
                 onCopy={() => void copyConsole()}
+                inputPrompt={inputPrompt}
+                onSendInput={sendConsoleInput}
+                onInterrupt={cancelExecution}
                 height={consoleCollapsed ? undefined : layout.console}
               />
             </>
