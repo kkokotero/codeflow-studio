@@ -2,6 +2,9 @@ import dagre from '@dagrejs/dagre'
 import type { DiagramGraph, FlowCardData, FlowCardEdge, FlowCardNode, FlowEdgeRole, FlowShape, NodeKind } from '@/lib/codeflow-types'
 import { routeFlowEdges } from '@/lib/flow-routing'
 
+/** Tamaño de los puntos de convergencia: apenas un punto en el diagrama. */
+export const JUNCTION_SIZE = 18
+
 export const MAX_SOURCE_CHARACTERS = 50_000
 export const MAX_DIAGRAM_NODES = 180
 export const MAX_DIAGRAM_DEPTH = 24
@@ -78,9 +81,26 @@ export class DiagramComplexityError extends Error {
   }
 }
 
+/** Rótulos genéricos deunion: no aportan información al unir flechas. */
+const MERGE_LABELS = new Set(['siguiente', 'unir', 'continuar'])
+
+/**
+ * Elige el rótulo de la flecha directa que sustituye a una convergencia.
+ *
+ * Gana el rótulo de la flecha que entraba (dice por qué se llega ahí); si es
+ * genérico, se usa el de salida.
+ */
+function mergeLabels(incoming: unknown, outgoing: unknown): string {
+  const inc = typeof incoming === 'string' ? incoming : ''
+  const out = typeof outgoing === 'string' ? outgoing : ''
+  if (inc && !MERGE_LABELS.has(inc)) return inc
+  if (out && !MERGE_LABELS.has(out)) return out
+  return inc || out
+}
+
 export class FlowGraphBuilder {
-  readonly nodes: FlowCardNode[] = []
-  readonly edges: FlowCardEdge[] = []
+  nodes: FlowCardNode[] = []
+  edges: FlowCardEdge[] = []
   private nextNodeId = 0
   private nextEdgeId = 0
   private nextConnectorId = 0
@@ -99,10 +119,57 @@ export class FlowGraphBuilder {
     return id
   }
 
+  /**
+   * Punto de convergencia del flujo.
+   *
+   * Solo une flechas: no es un paso del programa, así que antes de dibujar el
+   * diagrama se sustituye por conexiones directas entre origen y destino.
+   */
   addConnector(line: number, depth: number, detail = 'Convergencia de flujo'): string {
     const index = this.nextConnectorId++
     const label = index < 26 ? String.fromCharCode(65 + index) : `C${index + 1}`
-    return this.addNode({ kind: 'connector', label, line, detail, shape: 'connector' }, depth)
+    return this.addNode({ kind: 'connector', label, line, detail, shape: 'connector', junction: true }, depth)
+  }
+
+  /**
+   * Sustituye las convergencias por conexiones directas.
+   *
+   * Un punto de convergencia solo existe para poder unir flechas: al quitarlo,
+   * cada flecha que entraba en él pasa a ir directamente a su destino, sin
+   * intermediarios ni cajas vacías en el diagrama.
+   */
+  private inlineJunctions(): void {
+    for (let guard = 0; guard < 64; guard += 1) {
+      const junction = this.nodes.find((node) => node.data.junction)
+      if (!junction) break
+      const incoming = this.edges.filter((edge) => edge.target === junction.id)
+      const outgoing = this.edges.filter((edge) => edge.source === junction.id)
+      const rest = this.edges.filter((edge) => edge.source !== junction.id && edge.target !== junction.id)
+      if (!incoming.length || !outgoing.length) {
+        this.edges = rest
+        this.nodes = this.nodes.filter((node) => node.id !== junction.id)
+        continue
+      }
+      const merged: FlowCardEdge[] = []
+      for (const out of outgoing) {
+        for (const inc of incoming) {
+          merged.push({
+            ...out,
+            id: `edge-${this.nextEdgeId++}`,
+            source: inc.source,
+            target: out.target,
+            label: mergeLabels(inc.label, out.label),
+            style: inc.style ?? out.style,
+            markerEnd: inc.markerEnd ?? out.markerEnd,
+            labelStyle: inc.labelStyle ?? out.labelStyle,
+            labelBgStyle: inc.labelBgStyle ?? out.labelBgStyle,
+            data: { ...out.data, ...inc.data, role: inc.data?.role ?? out.data?.role },
+          })
+        }
+      }
+      this.edges = [...rest, ...merged]
+      this.nodes = this.nodes.filter((node) => node.id !== junction.id)
+    }
   }
 
   addEdge(source: string | null | undefined, target: string | null | undefined, label: string, role: FlowEdgeRole = 'control'): void {
@@ -131,6 +198,9 @@ export class FlowGraphBuilder {
   toGraph(): DiagramGraph {
     if (!this.nodes.length) return { nodes: [], edges: [] }
 
+    // Las convergencias desaparecen antes de calcular la distribución.
+    this.inlineJunctions()
+
     const layout = new dagre.graphlib.Graph({ multigraph: true })
     layout.setGraph({
       rankdir: 'TB',
@@ -147,8 +217,8 @@ export class FlowGraphBuilder {
     const dimensions = new Map<string, { width: number; height: number }>()
     for (const node of this.nodes) {
       const shape = node.data.shape
-      const width = shape === 'connector' ? 62 : shape === 'terminator' ? 190 : shape === 'decision' || shape === 'input-output' ? 220 : 196
-      const height = shape === 'connector' ? 62 : shape === 'decision' ? 140 : shape === 'terminator' ? 86 : shape === 'input-output' ? 92 : node.data.expression ? 110 : 98
+      const width = node.data.junction ? JUNCTION_SIZE : shape === 'connector' ? 62 : shape === 'terminator' ? 190 : shape === 'decision' || shape === 'input-output' ? 220 : 196
+      const height = node.data.junction ? JUNCTION_SIZE : shape === 'connector' ? 62 : shape === 'decision' ? 140 : shape === 'terminator' ? 86 : shape === 'input-output' ? 92 : node.data.expression ? 110 : 98
       dimensions.set(node.id, { width, height })
       layout.setNode(node.id, { width, height })
     }

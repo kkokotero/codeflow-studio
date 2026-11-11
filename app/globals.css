@@ -1575,6 +1575,17 @@
 .flow-node--shape-input-output .flow-node__shape::before { inset: 0; background: var(--node-accent, var(--cf-accent)); }
 .flow-node--shape-input-output .flow-node__shape::after { inset: 1px; background: var(--cf-surface-raised); }
 .flow-node--shape-input-output .flow-node__content { min-height: 78px; padding: 12px 30px; align-items: center; text-align: center; }
+/* Punto de convergencia: solo une flechas, no es un paso del programa. */
+.flow-node--junction { width: 18px; min-height: 18px; }
+.flow-node--junction .flow-node__shape {
+  inset: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cf-line-strong);
+  opacity: 0.75;
+}
+.flow-node--junction:hover .flow-node__shape { box-shadow: none; }
+
 .flow-node--shape-connector { width: 64px; min-height: 64px; }
 .flow-node--shape-connector .flow-node__shape { border: 1px solid var(--node-accent, var(--cf-accent)); border-radius: 50%; background: var(--cf-surface-raised); }
 .flow-node--shape-connector .flow-node__content { min-height: 64px; padding: 4px; align-items: center; text-align: center; }

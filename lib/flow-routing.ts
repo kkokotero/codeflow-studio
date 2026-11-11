@@ -75,6 +75,8 @@ const fallbackSizes: Record<FlowShape, { width: number; height: number }> = {
 }
 
 export function getFlowNodeSize(node: FlowCardNode) {
+  // Los puntos de convergencia son pequeños: solo unen flechas.
+  if (node.data.junction) return { width: 18, height: 18 }
   const fallback = fallbackSizes[node.data.shape ?? 'process']
   return {
     width: node.measured?.width ?? node.width ?? fallback.width,

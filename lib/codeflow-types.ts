@@ -73,6 +73,11 @@ export interface FlowCardData extends Record<string, unknown> {
   phase?: 'initialization' | 'condition' | 'body' | 'update' | 'exit' | 'merge' | 'branch'
   /** La instrucción con el vocabulario común, para editar el flujo. */
   pseudo?: PseudoInstruction
+  /**
+   * Punto de convergencia: solo une flechas, no es un paso del programa.
+   * Se dibuja como un punto y no aparece con etiqueta.
+   */
+  junction?: boolean
 }
 
 export type FlowCardNode = Node<FlowCardData, 'flowCard'>

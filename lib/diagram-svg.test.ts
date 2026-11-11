@@ -99,13 +99,22 @@ describe('exportación del diagrama', () => {
     expect(svg).toContain('BUCLE')
   })
 
-  it('omite los metadatos que el lienzo tampoco muestra', () => {
-    const graph = analyzeCode('if (a < b) { print(a) } else { print(b) }\n', 'javascript')
+  it('no deja bucles vacíos en el archivo exportado', () => {
+    const graph = analyzeCode('for (let index = 0; index < 3; index += 1) {\n  work(index)\n}\n', 'javascript')
     const svg = buildDiagramSvg(graph.nodes, graph.edges, { palette, title: 'Diagrama' })
-    const connector = graph.nodes.find((node) => node.data.kind === 'connector')
 
-    // El conector solo enseña su letra: sin tipo ni número de línea.
-    expect(connector).toBeDefined()
+    // Las convergencias no llegan al archivo: no hay círculos con letras.
+    expect(graph.nodes.filter((node) => node.data.junction)).toHaveLength(0)
+    expect(svg).not.toContain('CONECTOR')
+  })
+
+  it('omite los metadatos que el lienzo tampoco muestra', () => {
+    const graph = analyzeCode('switch (kind) {\n  case "a": run()\n  default: stop()\n}\n', 'javascript')
+    const svg = buildDiagramSvg(graph.nodes, graph.edges, { palette, title: 'Diagrama' })
+    const marker = graph.nodes.find((node) => node.data.kind === 'connector')
+
+    // El marcador de caso solo enseña su letra: sin tipo ni número de línea.
+    expect(marker).toBeDefined()
     expect(svg).not.toContain('CONECTOR')
   })
 })

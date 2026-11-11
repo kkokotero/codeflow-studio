@@ -1889,7 +1889,10 @@ interface SymbolListProps {
 
 /** Lista de símbolos del archivo actual. Cada fila salta a su línea en el editor. */
 function SymbolList({ graph, onSelect }: SymbolListProps) {
-  const nodes = [...graph.nodes].sort((left, right) => left.data.line - right.data.line)
+  // Los puntos de convergencia no son símbolos: solo unen flechas.
+  const nodes = [...graph.nodes]
+    .filter((node) => !node.data.junction)
+    .sort((left, right) => left.data.line - right.data.line)
   if (!nodes.length) {
     return (
       <div className="cf-empty">

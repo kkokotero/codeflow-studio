@@ -38,7 +38,8 @@ describe('analyzeCode', () => {
     expect(decision.data.shape).toBe('decision')
     expect(edgesWithRole(graph, 'true')).toHaveLength(1)
     expect(edgesWithRole(graph, 'false')).toHaveLength(1)
-    expect(nodesOfKind(graph, 'connector')).toHaveLength(1)
+    // Las ramas se unen directamente: sin punto de convergencia en el diagrama.
+    expect(nodesOfKind(graph, 'connector')).toHaveLength(0)
     expect(new Set(branches.map((edge) => edge.sourceHandle)).size).toBe(2)
     expect(new Set(targets.map((node) => node.position.x)).size).toBe(2)
     expect(targets.every((node) => node.position.y > decision.position.y)).toBe(true)
@@ -164,6 +165,21 @@ describe('analyzeCode', () => {
     }
   })
 
+  it('connects the branches directly, without intermediate points', () => {
+    const graph = analyzeCode('for (let index = 0; index < 3; index += 1) {\n  work(index)\n}\nafter()\n', 'javascript')
+    const loop = nodesOfKind(graph, 'loop')[0]
+    const after = graph.nodes.find((node) => node.data.label === 'after()')
+    const junctions = graph.nodes.filter((node) => node.data.junction)
+
+    expect(graph.error).toBeUndefined()
+    // Las convergencias se sustituyen por conexiones directas.
+    expect(junctions).toHaveLength(0)
+    expect(nodesOfKind(graph, 'connector')).toHaveLength(0)
+    expect(graph.edges.some((edge) => edge.source === loop.id && edge.target === after?.id)).toBe(true)
+    // La flecha directa conserva el motivo por el que se sale del bucle.
+    expect(graph.edges.find((edge) => edge.source === loop.id && edge.target === after?.id)?.label).toBe('falso · salir')
+  })
+
   it('keeps the operands of every node so the flow can be edited', () => {
     const graph = analyzeCode('const total = 0\nif (total > 0) { console.log(total) }\n', 'javascript')
     const assignment = nodesOfKind(graph, 'variable')[0]
@@ -265,7 +281,9 @@ describe('analyzeCode', () => {
     expect(graph.error).toBeUndefined()
     expect(graph.edges.some((edge) => edge.source === continueNode?.id && edge.target === loop.id && edge.data?.role === 'repeat')).toBe(true)
     expect(breakEdge?.target).toBe(loopExitEdge?.target)
-    expect(nodesOfKind(graph, 'connector').some((node) => node.id === breakEdge?.target)).toBe(true)
+    // El break va directo al nodo siguiente al bucle, sin punto intermedio.
+    expect(nodesOfKind(graph, 'connector')).toHaveLength(0)
+    expect(nodesOfKind(graph, 'return').some((node) => node.id === breakEdge?.target)).toBe(true)
   })
 
   it('returns no partial graph for malformed or unsupported syntax', () => {

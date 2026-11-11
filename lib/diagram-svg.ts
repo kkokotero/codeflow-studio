@@ -139,6 +139,8 @@ function nodeLineLabel(data: FlowCardData): string {
  */
 function drawNode(node: FlowCardNode, palette: DiagramPalette): string {
   const data = node.data as FlowCardData
+  // Los puntos de convergencia no se dibujan: las flechas ya se unen ahí.
+  if (data.junction) return ''
   const { width, height } = getFlowNodeSize(node)
   const shape = resolveNodeShape(data)
   const accent = palette.node[data.kind] ?? palette.accent
