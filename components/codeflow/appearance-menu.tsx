@@ -415,7 +415,7 @@ export function AppearancePanel({
                     onClick={() => onModeChange(option.id)}
                   >
                     <Icon aria-hidden="true" />
-                    {option.label}
+                    <span>{option.label}</span>
                   </button>
                 )
               })}

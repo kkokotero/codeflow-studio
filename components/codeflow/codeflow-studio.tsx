@@ -429,6 +429,7 @@ export function CodeflowStudio() {
   )
 
   const isSectionClosed = useCallback((id: SectionId) => closedSections.includes(id), [closedSections])
+  const allSectionsClosed = SECTION_ORDER.every((id) => isSectionClosed(id))
 
   const setSectionClosed = useCallback((id: SectionId, closed: boolean) => {
     setLayout((current) => {
@@ -1278,6 +1279,28 @@ export function CodeflowStudio() {
                 '--cf-w-inspector': `${layout.inspector}px`,
               } as React.CSSProperties}
             >
+              {allSectionsClosed ? (
+                <div className="cf-workspace-empty">
+                  <span className="cf-workspace-empty__glyph"><APP_ICONS.layout aria-hidden="true" /></span>
+                  <strong>No hay ninguna sección abierta</strong>
+                  <span>
+                    El estudio está entero. Abre la sección que necesites para seguir trabajando:
+                    sus iconos están junto al botón de ejecutar.
+                  </span>
+                  <div className="cf-workspace-empty__actions">
+                    {SECTION_ORDER.map((id) => {
+                      const Icon = SECTION_ICONS[id]
+                      return (
+                        <Button key={id} variant="outline" size="sm" onClick={() => setSectionClosed(id, false)}>
+                          <Icon aria-hidden="true" />
+                          Abrir {SECTION_LABELS[id]}
+                        </Button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <>
 {!isSectionClosed('files') && (
 <>
                 <aside className={`cf-files ${mobilePane === 'files' ? 'is-mobile-active' : ''}`} aria-label="Archivos del proyecto">
@@ -1634,6 +1657,8 @@ export function CodeflowStudio() {
                 </aside>
 </>
 )}
+                </>
+              )}
             </div>
 
             {!isSectionClosed('console') && (

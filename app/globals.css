@@ -59,7 +59,7 @@
   --border: var(--md-sys-color-outline-variant, #3a4442);
   --input: var(--md-sys-color-outline-variant, #3a4442);
   --ring: var(--md-sys-color-primary, #a6d68a);
-  --radius: 0.7rem;
+  --radius: 0.55rem;
 
   /* Superficies de la aplicación */
   --cf-surface-app: var(--md-sys-color-surface, #101414);
@@ -102,8 +102,8 @@
    * curvas de animación, al comportamiento elástico de iOS. Ambos comparten
    * los mismos tokens para que la página y el estudio se muevan igual.
    */
-  --cf-radius-card: 20px;
-  --cf-radius-tile: 16px;
+  --cf-radius-card: 10px;
+  --cf-radius-tile: 8px;
   --cf-radius-pill: 999px;
   --cf-shadow-soft: 0 1px 2px rgb(0 0 0 / 5%), 0 6px 18px rgb(0 0 0 / 6%);
   --cf-shadow-lift: 0 2px 6px rgb(0 0 0 / 9%), 0 20px 44px rgb(0 0 0 / 16%);
@@ -185,8 +185,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  gap: 4px;
-  padding: 6px 6px 0;
+  gap: 2px;
+  padding: 4px 4px 0;
   background: var(--cf-surface-app);
 }
 
@@ -215,6 +215,39 @@
   flex: 1 1 0;
   min-width: 220px;
 }
+
+/* Si una sección falta, la otra ocupa su hueco: nada queda vacío. */
+.cf-workspace:not(:has(.cf-diagram)) .cf-editor { flex: 1 1 auto; }
+.cf-workspace:not(:has(.cf-editor)) .cf-diagram { flex: 1 1 auto; }
+
+/* Todas las secciones cerradas: un aviso con la forma de recuperarlas. */
+.cf-workspace-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.cf-workspace-empty__glyph {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--cf-line);
+  border-radius: 14px;
+  background: var(--cf-surface-raised);
+  color: var(--cf-accent);
+}
+
+.cf-workspace-empty__glyph svg { width: 22px; height: 22px; }
+
+.cf-workspace-empty strong { color: var(--cf-text); font-size: 14px; font-weight: 620; }
+.cf-workspace-empty span { max-width: 38ch; color: var(--cf-text-muted); font-size: var(--cf-text-sm); line-height: 1.5; }
+
+.cf-workspace-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
 .cf-inspector {
   flex: 0 0 var(--cf-w-inspector, 268px);
@@ -457,7 +490,8 @@
   z-index: 60;
   display: grid;
   gap: 14px;
-  width: 252px;
+  width: 296px;
+  max-width: calc(100vw - 24px);
   padding: 14px;
   border: 1px solid var(--cf-line);
   border-radius: var(--cf-radius-card);
@@ -467,8 +501,8 @@
 }
 
 @keyframes cf-appearance-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .cf-appearance__group { display: grid; gap: 8px; }
@@ -484,11 +518,11 @@
 
 /* Selector de tema: un control segmentado, no una lista de opciones. */
 .cf-segmented {
-  display: grid;
-  grid-auto-flow: column;
+  display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   padding: 2px;
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--cf-surface-hover);
 }
 
@@ -497,6 +531,8 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 26px;
   padding: 0 8px;
   border: 0;
@@ -509,7 +545,8 @@
   transition: background 180ms var(--cf-motion), color 180ms var(--cf-motion), border-radius 220ms var(--cf-motion-emphasized);
 }
 
-.cf-segmented button svg { width: 13px; height: 13px; flex: 0 0 13px; }
+.cf-segmented button svg { width: 12px; height: 12px; flex: 0 0 12px; }
+.cf-segmented button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cf-segmented button:hover { color: var(--cf-text); }
 .cf-segmented button.is-active { border-radius: 6px; background: var(--cf-surface-raised); color: var(--cf-text); box-shadow: var(--cf-shadow-soft); }
 .cf-segmented button.is-active svg { color: var(--cf-accent); }
@@ -530,7 +567,6 @@
   transition: transform 200ms var(--cf-motion-emphasized), border-color 180ms var(--cf-motion), border-radius 220ms var(--cf-motion-emphasized);
 }
 
-.cf-swatch:hover { transform: scale(1.08); }
 .cf-swatch.is-active { border-color: var(--cf-accent); border-radius: 8px; }
 .cf-swatch > span { width: 18px; height: 18px; border-radius: 50%; }
 .cf-swatch.is-active > span { border-radius: 4px; }
@@ -631,7 +667,7 @@
 }
 
 .cf-menu[data-starting-style],
-.cf-menu[data-ending-style] { opacity: 0; transform: scale(0.97); }
+.cf-menu[data-ending-style] { opacity: 0; }
 
 .cf-menu__label {
   display: block;
@@ -912,13 +948,9 @@
 }
 
 .cf-project-card:hover {
-  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--cf-accent) 32%, var(--cf-line));
-  border-radius: 26px;
   box-shadow: var(--cf-shadow-lift);
 }
-
-.cf-project-card:active { transform: translateY(0) scale(0.994); }
 
 .cf-project-card.is-active {
   border-color: color-mix(in srgb, var(--cf-accent) 46%, var(--cf-line));
@@ -949,11 +981,6 @@
   color: var(--cf-accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cf-accent) 22%, transparent);
   transition: border-radius 260ms var(--cf-motion-emphasized), transform 260ms var(--cf-motion-emphasized);
-}
-
-.cf-project-card:hover .cf-project-card__icon {
-  border-radius: 21px;
-  transform: scale(1.04);
 }
 
 .cf-project-card__icon svg { width: 19px; height: 19px; }
@@ -1800,8 +1827,7 @@
     transform 180ms var(--cf-motion);
 }
 
-.cf-flow-form:hover:not(:disabled) { border-color: var(--cf-line-strong); color: var(--cf-text); transform: translateY(-1px); }
-.cf-flow-form:active:not(:disabled) { transform: scale(0.97); }
+.cf-flow-form:hover:not(:disabled) { border-color: var(--cf-line-strong); color: var(--cf-text); }
 
 .cf-flow-form.is-active {
   border-color: transparent;
@@ -1864,7 +1890,7 @@
   flex-direction: column;
   min-height: 0;
   height: 158px;
-  margin: 0 6px 6px;
+  margin: 0 4px 4px;
   overflow: hidden;
   border: 1px solid var(--cf-line);
   border-radius: var(--cf-radius-card);
@@ -2155,9 +2181,7 @@
 /* Insignias: una forma continua que se vuelve círculo al apuntarla. */
 .cf-badge-strip { display: flex; flex-wrap: wrap; gap: 12px; padding: 2px 0 8px; }
 .cf-badge { display: grid; justify-items: center; gap: 7px; width: 82px; flex: 0 0 82px; text-align: center; transition: transform 240ms var(--cf-motion-emphasized); }
-.cf-badge:hover { transform: translateY(-3px); }
 .cf-badge > span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 16px; background: linear-gradient(140deg, color-mix(in srgb, var(--cf-accent) 26%, transparent), color-mix(in srgb, var(--cf-accent) 8%, transparent)); color: var(--cf-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cf-accent) 24%, transparent); transition: border-radius 240ms var(--cf-motion-emphasized); }
-.cf-badge:hover > span { border-radius: 23px; }
 .cf-badge svg { width: 19px; height: 19px; }
 .cf-badge small {
   display: -webkit-box;
@@ -2178,18 +2202,17 @@
 /* Filtros en forma de cápsula que cambian de forma al activarse. */
 .cf-achievement-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 .cf-achievement-filters button { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--cf-line); border-radius: var(--cf-radius-pill); background: transparent; color: var(--cf-text-muted); font-size: var(--cf-text-sm); font-weight: 550; transition: border-radius 240ms var(--cf-motion-emphasized), background 200ms var(--cf-motion), color 200ms var(--cf-motion), border-color 200ms var(--cf-motion), transform 200ms var(--cf-motion); }
-.cf-achievement-filters button:hover { border-color: var(--cf-line-strong); color: var(--cf-text); transform: translateY(-1px); }
+.cf-achievement-filters button:hover { border-color: var(--cf-line-strong); color: var(--cf-text); }
 .cf-achievement-filters button.is-active { border-color: transparent; border-radius: 12px; background: var(--cf-accent-container); color: var(--md-sys-color-on-primary-container, #d7e8c8); font-weight: 650; }
 .cf-achievement-filters .cf-count { background: color-mix(in srgb, var(--cf-text) 8%, transparent); }
 .cf-achievement-filters button.is-active .cf-count { background: color-mix(in srgb, var(--cf-text) 12%, transparent); color: inherit; }
 
 .cf-achievement-card { position: relative; display: flex; min-width: 0; min-height: 196px; flex-direction: column; padding: 14px; border: 1px solid var(--cf-line); border-radius: var(--cf-radius-card); background: var(--cf-surface-raised); box-shadow: var(--cf-shadow-soft); transition: transform 260ms var(--cf-motion-emphasized), border-radius 260ms var(--cf-motion-emphasized), border-color 200ms var(--cf-motion), box-shadow 260ms var(--cf-motion); }
-.cf-achievement-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--cf-accent) 28%, var(--cf-line)); border-radius: 24px; box-shadow: var(--cf-shadow-lift); }
+.cf-achievement-card:hover { border-color: color-mix(in srgb, var(--cf-accent) 28%, var(--cf-line)); box-shadow: var(--cf-shadow-lift); }
 .cf-achievement-card--unlocked { border-color: color-mix(in srgb, var(--cf-accent) 40%, var(--cf-line)); }
 .cf-achievement-card--in-progress { border-color: color-mix(in srgb, var(--md-sys-color-secondary, #9fc6b2) 42%, var(--cf-line)); }
 .cf-achievement-card__top { display: flex; align-items: center; gap: 8px; min-height: 30px; }
 .cf-achievement-card__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 10px; background: var(--cf-surface-hover); color: var(--cf-text-muted); transition: border-radius 260ms var(--cf-motion-emphasized), transform 260ms var(--cf-motion-emphasized); }
-.cf-achievement-card:hover .cf-achievement-card__icon { border-radius: 15px; transform: scale(1.06); }
 .cf-achievement-card__icon svg { width: 15px; height: 15px; }
 .cf-achievement-card--unlocked .cf-achievement-card__icon { background: linear-gradient(140deg, color-mix(in srgb, var(--cf-accent) 28%, transparent), color-mix(in srgb, var(--cf-accent) 9%, transparent)); color: var(--cf-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cf-accent) 24%, transparent); }
 .cf-achievement-card__difficulty { padding: 2px 9px; border: 1px solid var(--cf-line); border-radius: var(--cf-radius-pill); color: var(--cf-text-muted); font-size: var(--cf-text-xs); font-weight: 600; }
@@ -2239,7 +2262,6 @@
   color: var(--cf-accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cf-accent) 26%, transparent);
 }
-.cf-recommended .cf-achievement-card:hover .cf-achievement-card__icon { border-radius: 23px; }
 .cf-recommended .cf-achievement-card__icon svg { width: 21px; height: 21px; }
 .cf-recommended .cf-achievement-card__difficulty {
   position: absolute;
@@ -2370,7 +2392,7 @@
   .cf-run-button { width: 30px; padding-inline: 0; }
   .cf-run-button__label { display: none; }
   .cf-workspace { position: relative; display: block; }
-  .cf-files, .cf-panel { position: absolute; inset: 6px 6px 0; display: none; }
+  .cf-files, .cf-panel { position: absolute; inset: 4px 4px 0; display: none; }
   .cf-files.is-mobile-active, .cf-panel.is-mobile-active { display: flex; }
   .cf-mobile-nav { display: grid; }
   .cf-brand__name { display: none; }
