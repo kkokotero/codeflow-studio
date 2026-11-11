@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { LANGUAGE_DEFINITIONS, SUPPORTED_LANGUAGES, type Language } from '@/lib/languages'
 
 interface NameDialogProps {
@@ -73,24 +74,34 @@ export function NameDialog({
 interface NewFileDialogProps {
   open: boolean
   initialLanguage: Language
+  folders: FolderOption[]
+  initialFolderId: string | null
   onClose: () => void
-  onConfirm: (name: string, language: Language) => void
+  onConfirm: (name: string, language: Language, folderId: string | null) => void
+}
+
+export interface FolderOption {
+  id: string
+  label: string
+  depth: number
 }
 
 /**
  * Alta de archivo: nombre y lenguaje en un solo paso, con la extensión
  * propuesta a partir del lenguaje escolhido.
  */
-export function NewFileDialog({ open, initialLanguage, onClose, onConfirm }: NewFileDialogProps) {
+export function NewFileDialog({ open, initialLanguage, folders, initialFolderId, onClose, onConfirm }: NewFileDialogProps) {
   const [name, setName] = useState('')
   const [language, setLanguage] = useState<Language>(initialLanguage)
+  const [folderId, setFolderId] = useState<string | null>(initialFolderId)
 
   useEffect(() => {
     if (open) {
       setName('')
       setLanguage(initialLanguage)
+      setFolderId(initialFolderId)
     }
-  }, [initialLanguage, open])
+  }, [initialFolderId, initialLanguage, open])
 
   const extension = LANGUAGE_DEFINITIONS[language].extension
   const trimmed = name.trim()
@@ -107,7 +118,7 @@ export function NewFileDialog({ open, initialLanguage, onClose, onConfirm }: New
           className="cf-dialog__form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (withExtension) onConfirm(withExtension, language)
+            if (withExtension) onConfirm(withExtension, language, folderId)
           }}
         >
           <label className="cf-field">
@@ -122,6 +133,14 @@ export function NewFileDialog({ open, initialLanguage, onClose, onConfirm }: New
             />
             {withExtension ? <span className="cf-field__hint">Se guardará como {withExtension}</span> : null}
           </label>
+          {folders.length > 1 && (
+            <label className="cf-field">
+              <span className="cf-field__label">Carpeta</span>
+              <select className="cf-field__input" value={folderId ?? ''} onChange={(event) => setFolderId(event.target.value || null)}>
+                {folders.map((folder) => <option key={folder.id} value={folder.id}>{'· '.repeat(folder.depth)}{folder.label}</option>)}
+              </select>
+            </label>
+          )}
           <fieldset className="cf-field">
             <legend className="cf-field__label">Lenguaje</legend>
             <div className="cf-language-grid">
@@ -146,6 +165,74 @@ export function NewFileDialog({ open, initialLanguage, onClose, onConfirm }: New
             <Button type="submit" variant="default" size="sm" disabled={!withExtension}>Crear archivo</Button>
           </div>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface ConfirmDialogProps {
+  open: boolean
+  title: string
+  description: string
+  confirmLabel: string
+  onClose: () => void
+  onConfirm: () => void
+}
+
+/**
+ * Confirmación para acciones destructivas: se dice qué se pierde y cómo se
+ * llama el botón que las ejecuta.
+ */
+export function ConfirmDialog({ open, title, description, confirmLabel, onClose, onConfirm }: ConfirmDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogContent className="cf-dialog--prompt">
+        <DialogTitle className="cf-dialog__title">{title}</DialogTitle>
+        <DialogDescription className="cf-dialog__description">{description}</DialogDescription>
+        <div className="cf-dialog__actions">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancelar</Button>
+          <Button type="button" variant="destructive" size="sm" onClick={onConfirm}>{confirmLabel}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface FolderPickerDialogProps {
+  open: boolean
+  title: string
+  description: string
+  folders: FolderOption[]
+  onClose: () => void
+  onConfirm: (folderId: string | null) => void
+}
+
+/** Elección de carpeta destino, con la jerarquía completa del proyecto. */
+export function FolderPickerDialog({ open, title, description, folders, onClose, onConfirm }: FolderPickerDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogContent className="cf-dialog--prompt">
+        <DialogTitle className="cf-dialog__title">{title}</DialogTitle>
+        <DialogDescription className="cf-dialog__description">{description}</DialogDescription>
+        <div className="cf-folder-list" role="listbox" aria-label="Carpetas">
+          {folders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              role="option"
+              aria-selected={false}
+              className="cf-folder-option"
+              style={{ paddingLeft: 10 + folder.depth * 16 }}
+              onClick={() => onConfirm(folder.id)}
+            >
+              <APP_ICONS.folder aria-hidden="true" />
+              {folder.label}
+            </button>
+          ))}
+        </div>
+        <div className="cf-dialog__actions">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancelar</Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

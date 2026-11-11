@@ -39,7 +39,10 @@ function MenuContent({
         collisionPadding={8}
         className="cf-menu-positioner"
       >
-        <MenuPrimitive.Popup {...props} className={cn('cf-menu', className)} />
+        <MenuPrimitive.Popup {...props} className={cn('cf-menu', className)}>
+          <span className="cf-menu__grabber" aria-hidden="true" />
+          {props.children}
+        </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   )

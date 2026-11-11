@@ -21,6 +21,7 @@ interface ConsolePanelProps {
   status: RunStatus
   notice: string
   collapsed: boolean
+  height?: number
   onToggleCollapsed: () => void
   onClear: () => void
 }
@@ -32,7 +33,7 @@ interface ConsolePanelProps {
  * estado de la última ejecución y dos acciones que hacen algo real (copiar y
  * limpiar). Nada de controles que nunca reciben datos.
  */
-export function ConsolePanel({ logs, status, notice, collapsed, onToggleCollapsed, onClear }: ConsolePanelProps) {
+export function ConsolePanel({ logs, status, notice, collapsed, height, onToggleCollapsed, onClear }: ConsolePanelProps) {
   const [copied, setCopied] = useState(false)
 
   const copyOutput = useCallback(async () => {
@@ -48,7 +49,11 @@ export function ConsolePanel({ logs, status, notice, collapsed, onToggleCollapse
   }, [logs])
 
   return (
-    <section className={`cf-console ${collapsed ? 'is-collapsed' : ''}`} aria-label="Consola de salida">
+    <section
+      className={`cf-console ${collapsed ? 'is-collapsed' : ''}`}
+      style={collapsed || height === undefined ? undefined : { height }}
+      aria-label="Consola de salida"
+    >
       <header className="cf-console__header">
         <button
           type="button"

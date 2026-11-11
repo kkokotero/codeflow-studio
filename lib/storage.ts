@@ -199,6 +199,81 @@ export function createFolder(
   }
 }
 
+/**
+ * Renombra una carpeta y reescribe la ruta de sus descendientes.
+ */
+export function renameFolder(state: StorageState, projectId: string, folderId: string, name: string): StorageState {
+  const index = findProjectIndex(state, projectId)
+  if (index < 0) return state
+  const project = state.projects[index]
+  const folder = project.folders.find((f) => f.id === folderId)
+  if (!folder) return state
+
+  const trimmed = name.trim() || folder.name
+  const parentPath = folder.parentId
+    ? project.folders.find((f) => f.id === folder.parentId)?.path ?? project.name
+    : project.name
+  const nextPath = `${parentPath}/${trimmed}`
+
+  const affected = new Set(collectDescendantFolderIds(project.folders, folderId))
+  affected.add(folderId)
+
+  const nextFolders = project.folders.map((candidate) => {
+    if (candidate.id === folderId) return { ...candidate, name: trimmed, path: nextPath }
+    if (affected.has(candidate.id)) {
+      const suffix = candidate.path.slice(folder.path.length)
+      return { ...candidate, path: `${nextPath}${suffix}` }
+    }
+    return candidate
+  })
+
+  const nextProject: Project = { ...project, folders: nextFolders, updatedAt: Date.now() }
+  const nextProjects = [...state.projects]
+  nextProjects[index] = nextProject
+  return { ...state, projects: nextProjects }
+}
+
+/**
+ * Mueve un archivo a otra carpeta del proyecto.
+ */
+export function moveFile(state: StorageState, projectId: string, fileId: string, folderId: string | null): StorageState {
+  const index = findProjectIndex(state, projectId)
+  if (index < 0) return state
+  const project = state.projects[index]
+  const fileIndex = findFileIndex(project, fileId)
+  if (fileIndex < 0) return state
+  const now = Date.now()
+  const file = { ...project.files[fileIndex], folderId, updatedAt: now }
+  const nextProject: Project = {
+    ...project,
+    files: [...project.files.slice(0, fileIndex), file, ...project.files.slice(fileIndex + 1)],
+    updatedAt: now,
+  }
+  const nextProjects = [...state.projects]
+  nextProjects[index] = nextProject
+  return { ...state, projects: nextProjects }
+}
+
+/**
+ * Crea un proyecto vacío, listo para recibir archivos.
+ */
+export function addEmptyProject(state: StorageState, name: string): StorageState {
+  const project = createProject(name.trim() || 'Proyecto sin título')
+  return {
+    ...state,
+    projects: [...state.projects, project],
+    activeProjectId: project.id,
+  }
+}
+
+/**
+ * Elimina un proyecto y devuelve el estado con el primer proyecto restante activo.
+ */
+export function removeProject(state: StorageState, projectId: string): StorageState {
+  const next = deleteProject(state, projectId)
+  return { ...next, activeProjectId: next.projects[0]?.id ?? null }
+}
+
 export function deleteFolder(state: StorageState, projectId: string, folderId: string): StorageState {
   const index = findProjectIndex(state, projectId)
   if (index < 0) return state
