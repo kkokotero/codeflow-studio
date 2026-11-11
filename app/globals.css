@@ -2102,19 +2102,35 @@
 
 .cf-dialog--wide { width: min(880px, calc(100vw - 32px)); }
 
-.cf-help__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.cf-help__eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--cf-text-muted); font-size: var(--cf-text-xs); font-weight: 600; letter-spacing: 0.04em; }
-.cf-help__eyebrow svg { width: 15px; height: 15px; color: var(--cf-accent); }
-.cf-help__title { margin: 14px 0 6px; font-size: clamp(20px, 3.2vw, 26px); font-weight: 640; letter-spacing: -0.02em; }
-.cf-help__lede { max-width: 640px; margin: 0 0 18px; color: var(--cf-text-muted); font-size: var(--cf-text-md); line-height: 1.6; }
+/* El diálogo de exportación necesita sitio para la vista previa. */
+.cf-dialog--preview { width: min(620px, calc(100vw - 32px)); }
 
-.cf-help__steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.cf-help__step { display: grid; grid-template-columns: 26px 1fr; gap: 4px 10px; padding: 13px; border: 1px solid var(--cf-line); border-radius: 12px; background: var(--cf-surface-raised); }
-.cf-help__step-index { grid-row: span 2; color: var(--cf-accent); font: var(--cf-text-sm) var(--cf-font-mono); }
-.cf-help__step strong { font-size: var(--cf-text-md); font-weight: 600; }
+.cf-help { display: grid; gap: 0; max-height: min(86vh, 780px); overflow: auto; }
+.cf-help__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 2; padding-bottom: 6px; background: var(--cf-surface-raised); }
+.cf-help__eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--cf-text-muted); font-size: var(--cf-text-xs); font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+.cf-help__eyebrow svg { width: 14px; height: 14px; color: var(--cf-accent); }
+
+.cf-help__hero { padding: 12px 0 18px; border-bottom: 1px solid var(--cf-line-soft); }
+.cf-help__title { margin: 0 0 6px; font-size: clamp(22px, 3.4vw, 30px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+.cf-help__lede { max-width: 62ch; margin: 0; color: var(--cf-text-muted); font-size: 13px; line-height: 1.6; }
+
+.cf-help__languages { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
+.cf-help__languages li { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 5px; border: 1px solid var(--cf-line); border-radius: 999px; background: var(--cf-surface-panel); color: var(--cf-text-muted); font-size: var(--cf-text-xs); font-weight: 550; }
+
+/* El cuerpo se reparte en dos columnas: el camino y la referencia. */
+.cf-help__body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; padding: 18px 0; }
+
+.cf-help__steps { display: grid; gap: 2px; align-content: start; }
+.cf-help__step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 3px 10px; padding: 10px 12px; border-radius: var(--cf-radius-card); }
+.cf-help__step-index { color: var(--cf-accent); font: var(--cf-text-xs) var(--cf-font-mono); }
+.cf-help__step-body { display: grid; gap: 3px; min-width: 0; }
+.cf-help__step strong { display: inline-flex; align-items: center; gap: 7px; font-size: var(--cf-text-md); font-weight: 640; letter-spacing: -0.01em; }
+.cf-help__step strong svg { width: 14px; height: 14px; color: var(--cf-accent); }
 .cf-help__step p { margin: 0; color: var(--cf-text-muted); font-size: var(--cf-text-sm); line-height: 1.55; }
 
-.cf-help__shortcuts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 16px 0; padding: 6px 14px 12px; border: 1px solid var(--cf-line); border-radius: 12px; background: var(--cf-surface-raised); }
+.cf-help__aside { display: grid; gap: 12px; align-content: start; }
+
+.cf-help__shortcuts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 6px 12px 10px; border: 1px solid var(--cf-line); border-radius: var(--cf-radius-card); background: var(--cf-surface-raised); }
 .cf-help__section-title { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 10px 0 8px; color: var(--cf-text); font-size: var(--cf-text-sm); font-weight: 600; }
 .cf-help__section-title svg { width: 14px; height: 14px; color: var(--cf-accent); }
 .cf-help__section-title span { margin-left: auto; color: var(--cf-text-muted); font-size: var(--cf-text-xs); font-weight: 400; }
@@ -2123,13 +2139,13 @@
 .cf-help__keys kbd { padding: 2px 6px; border: 1px solid var(--cf-line); border-radius: 5px; background: var(--cf-surface-canvas); color: var(--cf-text); font: 10px/1.5 var(--cf-font-mono); }
 .cf-help__alt { min-width: 74px; color: var(--cf-text-subtle); font-size: var(--cf-text-xs); text-align: right; }
 
-.cf-help__runtime { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 13px; border: 1px solid var(--cf-line); border-radius: 12px; background: var(--cf-surface-raised); }
+.cf-help__runtime { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px 12px; border: 1px solid var(--cf-line); border-radius: var(--cf-radius-card); background: var(--cf-surface-raised); }
 .cf-help__runtime p { display: flex; gap: 9px; margin: 0; color: var(--cf-text-muted); font-size: var(--cf-text-sm); line-height: 1.55; }
 .cf-help__runtime p svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; color: var(--md-sys-color-tertiary, #e0c08a); }
 
-.cf-help__limit { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--cf-line-soft); border-radius: 12px; color: var(--cf-text-muted); font-size: var(--cf-text-sm); line-height: 1.6; }
+.cf-help__limit { margin: 0; padding: 10px 12px; border: 1px solid var(--cf-line-soft); border-radius: var(--cf-radius-card); color: var(--cf-text-muted); font-size: var(--cf-text-xs); line-height: 1.6; }
 .cf-help__limit strong { color: var(--cf-text); }
-.cf-help__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--cf-text-muted); font-size: var(--cf-text-sm); }
+.cf-help__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--cf-line-soft); color: var(--cf-text-muted); font-size: var(--cf-text-sm); }
 .cf-help__footer code { font-family: var(--cf-font-mono); font-size: 10.5px; }
 
 /* --------------------------------------------------------------------- */
@@ -2319,6 +2335,53 @@
 }
 
 /* --------------------------------------------------------------------- */
+/* Vista previa de la exportación                                           */
+/* --------------------------------------------------------------------- */
+
+.cf-export-preview { display: grid; gap: 7px; margin: 0; }
+
+.cf-export-preview__frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-card);
+  background: var(--cf-surface-canvas);
+}
+
+.cf-export-preview__frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.cf-export-preview__empty { color: var(--cf-text-muted); font-size: var(--cf-text-sm); }
+
+.cf-export-preview figcaption {
+  color: var(--cf-text-muted);
+  font-size: var(--cf-text-xs);
+  font-family: var(--cf-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.cf-export-preview--note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--cf-line);
+  border-radius: var(--cf-radius-card);
+  background: var(--cf-surface-raised);
+}
+
+.cf-export-preview--note svg { width: 14px; height: 14px; flex: 0 0 14px; margin-top: 1px; color: var(--cf-accent); }
+.cf-export-preview--note p { margin: 0; color: var(--cf-text-muted); font-size: var(--cf-text-sm); line-height: 1.5; }
+
+/* --------------------------------------------------------------------- */
 /* Opciones de formato en los diálogos de exportación                      */
 /* --------------------------------------------------------------------- */
 
@@ -2434,7 +2497,7 @@
   .cf-page-header { flex-direction: column; align-items: flex-start; gap: 16px; }
   .cf-page-header__intro h1 { font-size: 27px; }
   .cf-page-header__trailing { width: 100%; justify-content: space-between; }
-  .cf-help__steps { grid-template-columns: 1fr; }
+  .cf-help__body { grid-template-columns: 1fr; }
   .cf-project-trigger__name { max-width: 130px; }
   .cf-language-trigger__label { display: none; }
   .cf-run-button__kbd { display: none; }

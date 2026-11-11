@@ -46,6 +46,7 @@ interface DiagramExportDialogProps {
  *
  * El SVG se genera desde los datos del grafo, no desde una captura del lienzo:
  * así el archivo es vectorial, conserva el estilo del tema y se puede editar.
+ * El mismo SVG se muestra como vista previa antes de descargar nada.
  */
 export function DiagramExportDialog({ open, graph, manualEdges, fileName, onClose, onExported }: DiagramExportDialogProps) {
   const [format, setFormat] = useState<DiagramFormat>('svg')
@@ -54,6 +55,29 @@ export function DiagramExportDialog({ open, graph, manualEdges, fileName, onClos
   const [error, setError] = useState('')
 
   const name = baseName(fileName).replace(/\.[^.]+$/, '') || 'diagrama'
+
+  const svg = useMemo(() => {
+    if (!open) return ''
+    const edges = [...graph.edges, ...manualEdges]
+    const palette = typeof document === 'undefined' ? null : readDiagramPalette()
+    if (!palette) return ''
+    return buildDiagramSvg(graph.nodes as FlowCardNode[], edges, { palette, title: `Diagrama de ${fileName}` })
+  }, [open, graph, manualEdges, fileName])
+
+  const previewUrl = useMemo(
+    () => (svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : ''),
+    [svg],
+  )
+
+  /** La vista previa se agranda cuando el diagrama es alto y estrecho. */
+  const previewHeight = useMemo(() => {
+    const size = svg?.match(/width="(\d+)" height="(\d+)"/)
+    if (!size) return 300
+    const width = Number(size[1])
+    const height = Number(size[2])
+    if (height <= width) return 260
+    return Math.round(Math.min(420, Math.max(300, (height / Math.max(width, 1)) * 150)))
+  }, [svg])
 
   const exportDiagram = useCallback(async () => {
     setBusy(true)
@@ -70,14 +94,14 @@ export function DiagramExportDialog({ open, graph, manualEdges, fileName, onClos
         }
         download(new Blob([JSON.stringify(diagram, null, 2)], { type: 'application/json;charset=utf-8' }), `${name}.diagram.json`)
       } else {
-        const svg = buildDiagramSvg(graph.nodes as FlowCardNode[], edges, {
+        const source = svg || buildDiagramSvg(graph.nodes as FlowCardNode[], edges, {
           palette: readDiagramPalette(),
           title: `Diagrama de ${fileName}`,
         })
         if (format === 'svg') {
-          download(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${name}.diagram.svg`)
+          download(new Blob([source], { type: 'image/svg+xml;charset=utf-8' }), `${name}.diagram.svg`)
         } else {
-          const blob = await svgToPng(svg, scale)
+          const blob = await svgToPng(source, scale)
           download(blob, `${name}.diagram.png`)
         }
       }
@@ -88,16 +112,38 @@ export function DiagramExportDialog({ open, graph, manualEdges, fileName, onClos
     } finally {
       setBusy(false)
     }
-  }, [fileName, format, graph, manualEdges, name, onClose, onExported, scale])
+  }, [fileName, format, graph, manualEdges, name, onClose, onExported, scale, svg])
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="cf-dialog--prompt">
+      <DialogContent className="cf-dialog--preview">
         <DialogTitle className="cf-dialog__title">Exportar diagrama</DialogTitle>
         <DialogDescription className="cf-dialog__description">
           El diagrama se genera desde el grafo del archivo, con el estilo del tema activo.
         </DialogDescription>
         <div className="cf-dialog__form">
+          {format === 'json' ? (
+            <div className="cf-export-preview cf-export-preview--note">
+              <APP_ICONS.info aria-hidden="true" />
+              <p>
+                El formato JSON guarda los datos del diagrama —nodos, posiciones y conexiones— para
+                volver a importarlos. No incluye la imagen.
+              </p>
+            </div>
+          ) : (
+            <figure className="cf-export-preview">
+              <div className="cf-export-preview__frame" style={{ height: previewHeight }}>
+                {previewUrl ? (
+                  <img src={previewUrl} alt={`Vista previa del diagrama de ${fileName}`} />
+                ) : (
+                  <span className="cf-export-preview__empty">No hay nada que previsualizar.</span>
+                )}
+              </div>
+              <figcaption>
+                Vista previa del archivo {name}.diagram.{format === 'png' ? 'png' : 'svg'}.
+              </figcaption>
+            </figure>
+          )}
           <fieldset className="cf-field">
             <legend className="cf-field__label">Formato</legend>
             <div className="cf-choice-grid">
