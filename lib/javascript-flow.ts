@@ -1,7 +1,8 @@
 import { parse } from '@babel/parser'
 import * as t from '@babel/types'
 import { compactSource, emptyFlowFragment, FlowGraphBuilder, type FlowFragment, type FlowNodeInput } from '@/lib/flow-graph-builder'
-import type { DiagramGraph } from '@/lib/codeflow-types'
+import { isInputFunction, isOutputFunction, PSEUDO, pseudoExpression, pseudoImportName } from '@/lib/pseudo-code'
+import type { DiagramGraph, PseudoInstruction } from '@/lib/codeflow-types'
 
 type LoopStatement = t.ForStatement | t.ForInStatement | t.ForOfStatement | t.WhileStatement | t.DoWhileStatement
 
@@ -36,6 +37,47 @@ function callExpression(statement: t.Statement): t.CallExpression | t.OptionalCa
   return t.isCallExpression(expression) || t.isOptionalCallExpression(expression) ? expression : null
 }
 
+/** Nombre de un destino enlazado: identificador, patrón o comodín. */
+function bindingName(node: t.Node): string {
+  if (t.isIdentifier(node)) return node.name
+  if (t.isMemberExpression(node) && t.isIdentifier(node.property)) {
+    const object = bindingName(node.object)
+    return object ? `${object}.${node.property.name}` : node.property.name
+  }
+  if (t.isObjectPattern(node)) return '{…}'
+  if (t.isArrayPattern(node)) return '[…]'
+  return 'valor'
+}
+
+/** Expresión de una llamada con el vocabulario común. */
+function callInstruction(call: t.CallExpression | t.OptionalCallExpression, source: string): PseudoInstruction {
+  const name = calleeName(call.callee) ?? 'llamar'
+  const args = call.arguments.map((argument) => pseudoExpression(sourceOf(argument as t.Node, source))).join(', ')
+  if (isOutputFunction(name)) return { form: 'print', name, value: args }
+  if (isInputFunction(name)) return { form: 'read', name, value: args }
+  return { form: 'call', name, value: args }
+}
+
+/** Valor resultante de una asignación, con los operadores compuestos. */
+function assignmentValue(operator: string, target: string, right: string): string {
+  const compound: Record<string, string> = { '+=': '+', '-=': '-', '*=': '*', '/=': '/', '%=': 'mod' }
+  const symbol = compound[operator]
+  return symbol ? `${target} ${symbol} ${right}` : right
+}
+
+/** Valor con el que avanza un bucle `for (…; …; avance)`. */
+function updateValue(update: t.Node, source: string): string {
+  if (t.isAssignmentExpression(update)) {
+    const target = bindingName(update.left)
+    return assignmentValue(update.operator, target, pseudoExpression(sourceOf(update.right, source)))
+  }
+  if (t.isUpdateExpression(update)) {
+    const target = bindingName(update.argument)
+    return assignmentValue(update.operator === '++' ? '+=' : '-=', target, '1')
+  }
+  return pseudoExpression(sourceOf(update, source))
+}
+
 function describeSimple(statement: t.Statement, source: string): FlowNodeInput {
   const code = sourceOf(statement, source)
   const line = statement.loc?.start.line ?? 1
@@ -43,31 +85,51 @@ function describeSimple(statement: t.Statement, source: string): FlowNodeInput {
 
   if (t.isVariableDeclaration(statement)) {
     const objectInitializer = statement.declarations.some((declaration) => declaration.init && (t.isObjectExpression(declaration.init) || t.isArrayExpression(declaration.init)))
-    return { ...base, kind: objectInitializer ? 'object' : 'variable', label: compactSource(code), detail: objectInitializer ? 'Proceso · inicializar colección' : 'Proceso · asignación' }
+    const declaration = statement.declarations[0]
+    const target = declaration ? bindingName(declaration.id) : ''
+    const value = declaration?.init ? pseudoExpression(sourceOf(declaration.init, source)) : ''
+    return { ...base, kind: objectInitializer ? 'object' : 'variable', label: PSEUDO.assign(target, value), detail: 'Proceso · asignación', pseudo: { form: 'assign', target, value } }
   }
-  if (t.isImportDeclaration(statement)) return { ...base, kind: 'import', label: compactSource(code), detail: 'Proceso · cargar dependencia' }
-  if (t.isReturnStatement(statement)) return { ...base, kind: 'return', label: compactSource(code || 'return'), detail: 'Salida de función' }
-  if (t.isThrowStatement(statement)) return { ...base, kind: 'event', label: compactSource(code), detail: 'Salida por excepción' }
-  if (t.isBreakStatement(statement)) return { ...base, kind: 'phase', label: 'break', detail: 'Salir del bucle actual', phase: 'exit' }
-  if (t.isContinueStatement(statement)) return { ...base, kind: 'phase', label: 'continue', detail: 'Continuar con la siguiente iteración', phase: 'update' }
+  if (t.isImportDeclaration(statement)) {
+    const name = pseudoImportName(statement.source.value)
+    return { ...base, kind: 'import', label: PSEUDO.import(name), detail: 'Proceso · cargar dependencia', pseudo: { form: 'import', name } }
+  }
+  if (t.isReturnStatement(statement)) {
+    const value = statement.argument ? pseudoExpression(sourceOf(statement.argument, source)) : ''
+    return { ...base, kind: 'return', label: PSEUDO.return(value), detail: 'Salida de función', pseudo: { form: 'return', value } }
+  }
+  if (t.isThrowStatement(statement)) {
+    const value = statement.argument ? pseudoExpression(sourceOf(statement.argument, source)) : ''
+    return { ...base, kind: 'event', label: PSEUDO.throw(value), detail: 'Salida por excepción', pseudo: { form: 'throw', value } }
+  }
+  if (t.isBreakStatement(statement)) return { ...base, kind: 'phase', label: PSEUDO.break(), detail: 'Salir del bucle actual', phase: 'exit', pseudo: { form: 'break' } }
+  if (t.isContinueStatement(statement)) return { ...base, kind: 'phase', label: PSEUDO.continue(), detail: 'Continuar con la siguiente iteración', phase: 'update', pseudo: { form: 'continue' } }
   if (t.isExpressionStatement(statement)) {
     const call = callExpression(statement)
     if (call) {
-      const name = calleeName(call.callee) ?? 'llamada'
-      const outputCalls = new Set(['console.log', 'console.info', 'console.warn', 'console.error', 'alert'])
-      const inputCalls = new Set(['prompt', 'confirm'])
-      if (outputCalls.has(name) || inputCalls.has(name)) {
-        return { ...base, kind: 'io', label: `${inputCalls.has(name) ? 'Entrada' : 'Salida'} · ${name}()`, detail: 'Entrada / salida de datos', shape: 'input-output' }
-      }
+      const instruction = callInstruction(call, source)
+      if (instruction.form === 'print') return { ...base, kind: 'io', label: PSEUDO.print(instruction.value), detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: instruction }
+      if (instruction.form === 'read') return { ...base, kind: 'io', label: PSEUDO.read(instruction.value), detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: instruction }
       const isAssignment = t.isAssignmentExpression(statement.expression) || t.isUpdateExpression(statement.expression)
-      return { ...base, kind: isAssignment ? 'variable' : 'call', label: compactSource(code), detail: isAssignment ? 'Proceso · actualizar valor' : 'Proceso · llamada' }
+      return { ...base, kind: isAssignment ? 'variable' : 'call', label: PSEUDO.call(instruction.name ?? 'llamar', instruction.value ?? ''), detail: isAssignment ? 'Proceso · actualizar valor' : 'Proceso · llamada', pseudo: instruction }
     }
-    if (t.isAssignmentExpression(statement.expression) || t.isUpdateExpression(statement.expression)) {
-      return { ...base, kind: 'variable', label: compactSource(code), detail: 'Proceso · actualizar valor' }
+    if (t.isAssignmentExpression(statement.expression)) {
+      const target = bindingName(statement.expression.left)
+      const right = pseudoExpression(sourceOf(statement.expression.right, source))
+      const value = assignmentValue(statement.expression.operator, target, right)
+      return { ...base, kind: 'variable', label: PSEUDO.assign(target, value), detail: 'Proceso · actualizar valor', pseudo: { form: 'assign', target, value, operator: '=' } }
+    }
+    if (t.isUpdateExpression(statement.expression)) {
+      const target = bindingName(statement.expression.argument)
+      const step = statement.expression.operator === '++' ? '+ 1' : '- 1'
+      return { ...base, kind: 'variable', label: PSEUDO.assign(target, `${target} ${step}`), detail: 'Proceso · actualizar valor', pseudo: { form: 'assign', target, value: `${target} ${step}`, operator: '=' } }
     }
   }
-  if (t.isClassDeclaration(statement)) return { ...base, kind: 'class', label: `class ${statement.id?.name ?? 'anónima'}`, detail: 'Proceso · definir clase' }
-  return { ...base, kind: 'statement', label: compactSource(code || statement.type), detail: 'Proceso · instrucción' }
+  if (t.isClassDeclaration(statement)) {
+    const name = statement.id?.name ?? 'anónima'
+    return { ...base, kind: 'class', label: PSEUDO.class(name), detail: 'Proceso · definir tipo', pseudo: { form: 'class', name } }
+  }
+  return { ...base, kind: 'statement', label: compactSource(code || statement.type, 46), detail: 'Proceso · instrucción', pseudo: { form: 'statement', value: pseudoExpression(code || statement.type) } }
 }
 
 function createSimpleFragment(statement: t.Statement, depth: number, builder: FlowGraphBuilder, source: string): FlowFragment {
@@ -125,7 +187,8 @@ function createFunctionSubgraph(
   let body: FlowFragment
   if (bodyExpression) {
     const returnSource = `return ${sourceOf(bodyExpression, source)}`
-    const returnId = builder.addNode({ kind: 'return', label: compactSource(returnSource), line, detail: 'Salida de función', source: returnSource }, depth + 2)
+    const returnValue = pseudoExpression(sourceOf(bodyExpression, source))
+    const returnId = builder.addNode({ kind: 'return', label: PSEUDO.return(returnValue), line, detail: 'Salida de función', source: returnSource, pseudo: { form: 'return', value: returnValue } }, depth + 2)
     body = { ...emptyFlowFragment(), entryId: returnId, returnIds: [returnId] }
   } else {
     body = buildSequence(bodyStatements, depth + 2, { loopDepth: 0, breakDepth: 0, functionDepth: context.functionDepth + 1 }, builder, source, functionEntries, pendingCalls)
@@ -140,7 +203,8 @@ function createFunctionSubgraph(
 
 function buildIf(statement: t.IfStatement, depth: number, context: BuildContext, builder: FlowGraphBuilder, source: string, functionEntries: Map<string, string>, pendingCalls: Array<{ nodeId: string; name: string }>): FlowFragment {
   const line = statement.loc?.start.line ?? 1
-  const decision = builder.addNode({ kind: 'condition', label: `¿${compactSource(sourceOf(statement.test, source), 35)}?`, line, detail: 'Decisión · if', source: sourceOf(statement, source) }, depth)
+  const condition = pseudoExpression(sourceOf(statement.test, source))
+  const decision = builder.addNode({ kind: 'condition', label: PSEUDO.condition(condition), line, detail: 'Decisión · condición', source: sourceOf(statement, source), pseudo: { form: 'condition', value: condition } }, depth)
   const yes = buildSequence(statementsOf(statement.consequent), depth + 1, context, builder, source, functionEntries, pendingCalls)
   const no = statement.alternate
     ? buildStatement(statement.alternate, depth + 1, context, builder, source, functionEntries, pendingCalls)
@@ -168,22 +232,28 @@ function buildLoop(statement: LoopStatement, depth: number, context: BuildContex
   const isFor = t.isForStatement(statement)
   const isForEach = t.isForInStatement(statement) || t.isForOfStatement(statement)
   const isDoWhile = t.isDoWhileStatement(statement)
-  const loopLabel = isFor
-    ? `¿${statement.test ? compactSource(sourceOf(statement.test, source), 34) : 'se solicita break'}?`
+  const loopValue = isFor
+    ? (statement.test ? pseudoExpression(sourceOf(statement.test, source)) : 'se solicita break')
     : isForEach
-      ? `¿Quedan elementos en ${compactSource(sourceOf(statement.right, source), 26)}?`
-      : `¿${compactSource(sourceOf(statement.test, source), 36)}?`
+      ? `quedan elementos en ${pseudoExpression(sourceOf(statement.right, source))}`
+      : pseudoExpression(sourceOf(statement.test, source))
+  const loopLabel = PSEUDO.loop(loopValue)
   const initNode = isFor && statement.init
-    ? builder.addNode({ kind: 'variable', label: compactSource(sourceOf(statement.init, source)), line, detail: 'Inicialización del bucle', source: sourceOf(statement.init, source) }, depth)
+    ? (() => {
+      const declaration = t.isVariableDeclaration(statement.init) ? statement.init.declarations[0] : null
+      const target = declaration ? bindingName(declaration.id) : 'índice'
+      const value = declaration?.init ? pseudoExpression(sourceOf(declaration.init, source)) : pseudoExpression(sourceOf(statement.init!, source))
+      return builder.addNode({ kind: 'variable', label: PSEUDO.assign(target, value), line, detail: 'Inicialización del bucle', source: sourceOf(statement.init, source), pseudo: { form: 'assign', target, value } }, depth)
+    })()
     : isForEach
       ? builder.addNode({ kind: 'phase', label: 'Inicializar iterador', line, detail: 'Preparar la colección', phase: 'initialization' }, depth)
       : null
   const entryNode = isDoWhile
     ? builder.addNode({ kind: 'phase', label: 'Ejecutar cuerpo primero', line, detail: 'Bucle de condición posterior', phase: 'initialization' }, depth)
     : null
-  const condition = builder.addNode({ kind: 'loop', label: loopLabel, line, detail: isDoWhile ? 'Decisión · do…while' : 'Decisión · iteración', source: sourceOf(statement, source) }, depth)
+  const condition = builder.addNode({ kind: 'loop', label: loopLabel, line, detail: 'Decisión · iteración', source: sourceOf(statement, source), pseudo: { form: 'loop', value: loopValue } }, depth)
   const update = (isFor && statement.update) || isForEach
-    ? builder.addNode({ kind: 'phase', label: isFor && statement.update ? compactSource(sourceOf(statement.update, source)) : 'Tomar siguiente elemento', line, detail: 'Actualizar iteración', phase: 'update' }, depth)
+    ? builder.addNode({ kind: 'phase', label: isFor && statement.update ? PSEUDO.assign('índice', updateValue(statement.update, source)) : 'Tomar siguiente elemento', line, detail: 'Actualizar iteración', phase: 'update' }, depth)
     : null
   const exit = builder.addConnector(line, depth, 'Salida del bucle')
   if (initNode) builder.addEdge(initNode, condition, 'evaluar', 'control')
@@ -218,7 +288,8 @@ function buildLoop(statement: LoopStatement, depth: number, context: BuildContex
 
 function buildSwitch(statement: t.SwitchStatement, depth: number, context: BuildContext, builder: FlowGraphBuilder, source: string, functionEntries: Map<string, string>, pendingCalls: Array<{ nodeId: string; name: string }>): FlowFragment {
   const line = statement.loc?.start.line ?? 1
-  const decision = builder.addNode({ kind: 'condition', label: `switch · ${compactSource(sourceOf(statement.discriminant, source), 30)}`, line, detail: 'Selección entre casos', source: sourceOf(statement, source) }, depth)
+  const selection = pseudoExpression(sourceOf(statement.discriminant, source))
+  const decision = builder.addNode({ kind: 'condition', label: PSEUDO.condition(selection), line, detail: 'Decisión · selección', source: sourceOf(statement, source), pseudo: { form: 'condition', value: selection } }, depth)
   const merge = builder.addConnector(line, depth, 'Continuación de selección')
   const cases = statement.cases
   const hasDefault = cases.some((item) => !item.test)
@@ -268,7 +339,7 @@ function buildSwitch(statement: t.SwitchStatement, depth: number, context: Build
 function buildTry(statement: t.TryStatement, depth: number, context: BuildContext, builder: FlowGraphBuilder, source: string, functionEntries: Map<string, string>, pendingCalls: Array<{ nodeId: string; name: string }>): FlowFragment {
   if (statement.finalizer) throw new Error('No se generó el diagrama: try/finally necesita una visualización explícita de sus salidas diferidas.')
   const line = statement.loc?.start.line ?? 1
-  const tryNode = builder.addNode({ kind: 'event', label: 'try · control de excepción', line, detail: 'Posible ruta de error', source: sourceOf(statement, source) }, depth)
+  const tryNode = builder.addNode({ kind: 'event', label: 'proteger', line, detail: 'Posible ruta de error', source: sourceOf(statement, source), pseudo: { form: 'statement', value: 'proteger' } }, depth)
   const body = buildSequence(statement.block.body, depth + 1, context, builder, source, functionEntries, pendingCalls)
   const handler = statement.handler ? buildSequence(statement.handler.body.body, depth + 1, context, builder, source, functionEntries, pendingCalls) : emptyFlowFragment()
   if (body.entryId) builder.addEdge(tryNode, body.entryId, 'ejecutar', 'body')
@@ -307,7 +378,7 @@ function buildStatement(statement: t.Statement, depth: number, context: BuildCon
   if (t.isFunctionDeclaration(statement) && statement.body) {
     const line = statement.loc?.start.line ?? 1
     const name = statement.id?.name ?? 'anónima'
-    const definition = builder.addNode({ kind: 'function', label: `Definir ${name}()`, line, detail: 'El cuerpo se muestra como subflujo', source: sourceOf(statement, source) }, depth)
+    const definition = builder.addNode({ kind: 'function', label: PSEUDO.define(name), line, detail: 'El cuerpo se muestra como subflujo', source: sourceOf(statement, source), pseudo: { form: 'define', name } }, depth)
     createFunctionSubgraph(name, statement.body.body, null, line, depth, definition, source, builder, functionEntries, context, pendingCalls)
     return { ...emptyFlowFragment(), entryId: definition, exitIds: [definition] }
   }
@@ -315,11 +386,11 @@ function buildStatement(statement: t.Statement, depth: number, context: BuildCon
   if (t.isClassDeclaration(statement)) {
     const line = statement.loc?.start.line ?? 1
     const name = statement.id?.name ?? 'anónima'
-    const id = builder.addNode({ kind: 'class', label: `class ${name}`, line, detail: 'Proceso · definir clase', source: sourceOf(statement, source) }, depth)
+    const id = builder.addNode({ kind: 'class', label: PSEUDO.class(name), line, detail: 'Proceso · definir tipo', source: sourceOf(statement, source), pseudo: { form: 'class', name } }, depth)
     for (const member of statement.body.body) {
       if (!t.isClassMethod(member) || !t.isBlockStatement(member.body)) continue
       const methodName = t.isIdentifier(member.key) ? member.key.name : 'método'
-      const method = builder.addNode({ kind: 'function', label: `${name}.${methodName}()`, line: member.loc?.start.line ?? line, detail: 'Método · subflujo separado', source: sourceOf(member, source) }, depth + 1)
+      const method = builder.addNode({ kind: 'function', label: PSEUDO.call(`${name}.${methodName}`), line: member.loc?.start.line ?? line, detail: 'Método · subflujo separado', source: sourceOf(member, source), pseudo: { form: 'define', name: `${name}.${methodName}` } }, depth + 1)
       builder.addEdge(id, method, 'método', 'data')
       createFunctionSubgraph(`${name}.${methodName}`, member.body.body, null, member.loc?.start.line ?? line, depth + 1, method, source, builder, functionEntries, context, pendingCalls)
     }

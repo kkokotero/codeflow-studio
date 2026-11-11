@@ -1,5 +1,6 @@
 import { parser } from '@lezer/python'
 import { compactSource, emptyFlowFragment, FlowGraphBuilder, lineAt, type FlowFragment, type FlowNodeInput } from '@/lib/flow-graph-builder'
+import { PSEUDO, pseudoAssignment, pseudoCall, pseudoExpression, pseudoImportName } from '@/lib/pseudo-code'
 import type { DiagramGraph } from '@/lib/codeflow-types'
 
 type PythonTree = ReturnType<typeof parser.parse>
@@ -40,8 +41,8 @@ function headerBetween(source: string, from: number, to: number): string {
   return source.slice(from, to).trim().replace(/:\s*$/, '').replace(/\s+/g, ' ')
 }
 
-function stripHeader(header: string, keyword: string): string {
-  return compactSource(header.replace(new RegExp(`^${keyword}\\s*`), ''), 38)
+function stripHeader(header: string, keyword: string, maxLength = 38): string {
+  return compactSource(header.replace(new RegExp(`^(?:${keyword})\\s*`), ''), maxLength)
 }
 
 function mergeAbrupt(target: FlowFragment, fragment: FlowFragment): void {
@@ -59,24 +60,39 @@ function simpleFragment(node: PythonNode, depth: number, context: PythonContext,
   const callName = code.match(/(?:^|[=,(]\s*)(print|input)\s*\(/)?.[1]
   if (node.name === 'ReturnStatement') {
     if (context.functionDepth === 0) throw new Error(`No se generó el diagrama: return fuera de una función, línea ${line}.`)
-    description = { ...base, kind: 'return', label: compactSource(code || 'return'), detail: 'Salida de función' }
+    const value = pseudoExpression(code.replace(/^return\b/i, '').trim())
+    description = { ...base, kind: 'return', label: PSEUDO.return(value), detail: 'Salida de función', pseudo: { form: 'return', value } }
   } else if (node.name === 'BreakStatement') {
     if (context.loopDepth === 0) throw new Error(`No se generó el diagrama: break fuera de un bucle, línea ${line}.`)
-    description = { ...base, kind: 'phase', label: 'break', detail: 'Salir del bucle actual', phase: 'exit' }
+    description = { ...base, kind: 'phase', label: PSEUDO.break(), detail: 'Salir del bucle actual', phase: 'exit', pseudo: { form: 'break' } }
   } else if (node.name === 'ContinueStatement') {
     if (context.loopDepth === 0) throw new Error(`No se generó el diagrama: continue fuera de un bucle, línea ${line}.`)
-    description = { ...base, kind: 'phase', label: 'continue', detail: 'Continuar con la siguiente iteración', phase: 'update' }
+    description = { ...base, kind: 'phase', label: PSEUDO.continue(), detail: 'Continuar con la siguiente iteración', phase: 'update', pseudo: { form: 'continue' } }
   } else if (node.name === 'RaiseStatement') {
-    description = { ...base, kind: 'event', label: compactSource(code), detail: 'Salida por excepción' }
+    const value = pseudoExpression(code.replace(/^raise\b/i, '').trim())
+    description = { ...base, kind: 'event', label: PSEUDO.throw(value), detail: 'Salida por excepción', pseudo: { form: 'throw', value } }
   } else if (callName) {
-    const direction = callName === 'input' ? 'Entrada' : 'Salida'
-    description = { ...base, kind: 'io', label: `${direction} · ${callName}()`, detail: 'Entrada / salida de datos', shape: 'input-output' }
+    const args = pseudoExpression(code.match(/\(([\s\S]*)\)/)?.[1]?.trim() ?? '')
+    description = callName === 'input'
+      ? { ...base, kind: 'io', label: PSEUDO.read(args), detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: { form: 'read', name: 'input', value: args } }
+      : { ...base, kind: 'io', label: PSEUDO.print(args), detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: { form: 'print', name: 'print', value: args } }
   } else if (node.name === 'ImportStatement' || node.name === 'FromImportStatement') {
-    description = { ...base, kind: 'import', label: compactSource(code), detail: 'Proceso · cargar dependencia' }
+    const name = pseudoImportName(code)
+    description = { ...base, kind: 'import', label: PSEUDO.import(name), detail: 'Proceso · cargar dependencia', pseudo: { form: 'import', name } }
   } else if (node.name === 'AssignStatement' || node.name === 'UpdateStatement') {
-    description = { ...base, kind: 'variable', label: compactSource(code), detail: 'Proceso · asignación' }
+    const assignment = pseudoAssignment(code)
+    if (assignment) {
+      description = { ...base, kind: 'variable', label: PSEUDO.assign(assignment.target ?? '?', assignment.value ?? ''), detail: 'Proceso · asignación', pseudo: assignment }
+    } else {
+      description = { ...base, kind: 'variable', label: compactSource(code, 46), detail: 'Proceso · asignación', pseudo: { form: 'statement', value: pseudoExpression(code) } }
+    }
   } else {
-    description = { ...base, kind: 'statement', label: compactSource(code || node.name), detail: 'Proceso · instrucción' }
+    const call = pseudoCall(code)
+    if (call && call.form === 'call') {
+      description = { ...base, kind: 'call', label: PSEUDO.call(call.name ?? 'llamar', call.value ?? ''), detail: 'Proceso · llamada', pseudo: call }
+    } else {
+      description = { ...base, kind: 'statement', label: compactSource(code || node.name, 46), detail: 'Proceso · instrucción', pseudo: { form: 'statement', value: pseudoExpression(code || node.name) } }
+    }
   }
 
   const id = builder.addNode(description, depth)
@@ -135,9 +151,9 @@ function buildIf(node: PythonNode, depth: number, context: PythonContext, builde
       elseDecision = previousDecision
       continue
     }
-    const condition = stripHeader(branch.header, /^(?:if|elif)\b/.test(branch.header) ? (/^elif\b/.test(branch.header) ? 'elif' : 'if') : 'if')
+    const condition = pseudoExpression(stripHeader(branch.header, /^(?:if|elif)\b/.test(branch.header) ? (/^elif\b/.test(branch.header) ? 'elif' : 'if') : 'if'))
     const line = branch.line
-    const decision = builder.addNode({ kind: 'condition', label: `¿${condition}?`, line, detail: 'Decisión · rama', source: branch.header }, depth)
+    const decision = builder.addNode({ kind: 'condition', label: PSEUDO.condition(condition), line, detail: 'Decisión · condición', source: branch.header, pseudo: { form: 'condition', value: condition } }, depth)
     if (!result.entryId) result.entryId = decision
     if (previousDecision) builder.addEdge(previousDecision, decision, 'falso · siguiente condición', 'false')
     previousDecision = decision
@@ -174,7 +190,8 @@ function buildLoop(node: PythonNode, depth: number, context: PythonContext, buil
   const bodies = bodiesOf(node)
   const header = headerBetween(source, node.from, bodies[0]?.from ?? node.to)
   const line = lineAt(source, node.from)
-  const loop = builder.addNode({ kind: 'loop', label: `¿${compactSource(header, 38)}?`, line, detail: 'Decisión · iteración', source: header }, depth)
+  const condition = pseudoExpression(stripHeader(header, 'for|while', 60))
+  const loop = builder.addNode({ kind: 'loop', label: PSEUDO.loop(condition), line, detail: 'Decisión · iteración', source: header, pseudo: { form: 'loop', value: condition } }, depth)
   const body = bodies[0] ? buildSequence(statementsOf(bodies[0]), depth + 1, { ...context, loopDepth: context.loopDepth + 1 }, builder, source, functionEntries, pendingCalls) : emptyFlowFragment()
   const emptyBody = !body.entryId ? builder.addNode({ kind: 'statement', label: 'Cuerpo vacío', line, detail: 'Sin instrucciones', phase: 'body' }, depth + 1) : null
   const exit = builder.addConnector(line, depth)
@@ -207,7 +224,8 @@ function buildMatch(node: PythonNode, depth: number, context: PythonContext, bui
   if (!clauses.length) return simpleFragment(node, depth, context, builder, source)
   const header = headerBetween(source, node.from, matchBody?.from ?? node.to)
   const line = lineAt(source, node.from)
-  const decision = builder.addNode({ kind: 'condition', label: compactSource(header, 38), line, detail: 'Decisión · match', source: header }, depth)
+  const selection = pseudoExpression(stripHeader(header, 'match', 60))
+  const decision = builder.addNode({ kind: 'condition', label: PSEUDO.condition(selection), line, detail: 'Decisión · selección', source: header, pseudo: { form: 'condition', value: selection } }, depth)
   const merge = builder.addConnector(line, depth)
   const result = emptyFlowFragment()
   result.entryId = decision
@@ -249,7 +267,7 @@ function buildTry(node: PythonNode, depth: number, context: PythonContext, build
     throw new Error(`No se generó el diagrama: try/finally requiere mostrar sus salidas diferidas (línea ${lineAt(source, node.from)}).`)
   }
   const line = lineAt(source, node.from)
-  const tryNode = builder.addNode({ kind: 'event', label: 'try · control de excepción', line, detail: 'Ruta normal y posibles excepciones', source: nodeSource(source, node) }, depth)
+  const tryNode = builder.addNode({ kind: 'event', label: 'proteger', line, detail: 'Ruta normal y posibles excepciones', source: nodeSource(source, node), pseudo: { form: 'statement', value: 'proteger' } }, depth)
   const trySegment = segments[0]
   const tryFlow = trySegment ? buildSequence(statementsOf(trySegment.body), depth + 1, context, builder, source, functionEntries, pendingCalls) : emptyFlowFragment()
   if (tryFlow.entryId) builder.addEdge(tryNode, tryFlow.entryId, 'ejecutar', 'body')
@@ -293,7 +311,7 @@ function buildFunction(node: PythonNode, depth: number, context: PythonContext, 
   const code = nodeSource(source, node)
   const name = code.match(/(?:async\s+)?def\s+([A-Za-z_]\w*)/)?.[1] ?? 'anónima'
   const line = nodeLine(source, node)
-  const definition = builder.addNode({ kind: 'function', label: `Definir ${name}()`, line, detail: 'El cuerpo se muestra como subflujo', source: code }, depth)
+  const definition = builder.addNode({ kind: 'function', label: PSEUDO.define(name), line, detail: 'El cuerpo se muestra como subflujo', source: code, pseudo: { form: 'define', name } }, depth)
   const body = bodiesOf(node)[0]
   const entry = builder.addNode({ kind: 'start', label: `Inicio · ${name}()`, line, detail: 'Entrada de función', shape: 'terminator' }, depth + 1)
   const exit = builder.addNode({ kind: 'end', label: `Fin · ${name}()`, line, detail: 'Salida de función', shape: 'terminator' }, depth + 1)
@@ -312,7 +330,7 @@ function buildClass(node: PythonNode, depth: number, context: PythonContext, bui
   const code = nodeSource(source, node)
   const name = code.match(/^class\s+([A-Za-z_]\w*)/)?.[1] ?? 'clase'
   const line = nodeLine(source, node)
-  const classNode = builder.addNode({ kind: 'class', label: `class ${name}`, line, detail: 'Proceso · definir clase', source: code }, depth)
+  const classNode = builder.addNode({ kind: 'class', label: PSEUDO.class(name), line, detail: 'Proceso · definir tipo', source: code, pseudo: { form: 'class', name } }, depth)
   const body = bodiesOf(node)[0]
   if (body) {
     const members = buildSequence(statementsOf(body), depth + 1, context, builder, source, functionEntries, pendingCalls)

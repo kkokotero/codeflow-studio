@@ -1560,6 +1560,118 @@
 .cf-node-inspector__meta { margin: -6px 0 0; color: var(--cf-text-muted); font-size: var(--cf-text-sm); }
 .cf-node-inspector__note { margin: 0; color: var(--cf-text-muted); font-size: var(--cf-text-sm); }
 
+.cf-node-inspector__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cf-node-inspector__head .cf-node-inspector__meta { margin: 0; }
+
+/* Vista previa del nodo: su silueta y el pseudo-código que genera. */
+.cf-flow-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--cf-line);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cf-text) 5%, transparent), transparent 52%),
+    var(--cf-surface-raised);
+}
+
+.cf-flow-preview__label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--cf-text-subtle);
+  font-size: var(--cf-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cf-flow-preview__code {
+  display: block;
+  color: var(--cf-text);
+  font: var(--cf-text-md)/1.45 var(--cf-font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Silueta mini: la misma forma que se usa en el diagrama. */
+.cf-flow-shape {
+  width: 44px;
+  height: 30px;
+  flex: 0 0 44px;
+  fill: color-mix(in srgb, var(--cf-accent) 16%, transparent);
+  stroke: var(--cf-accent);
+  stroke-width: 1.4;
+  transition: fill 200ms var(--cf-motion), stroke 200ms var(--cf-motion);
+}
+
+/* Botones de forma: eligen cómo se lee la instrucción. */
+.cf-flow-forms { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.cf-flow-form {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  flex: 1 1 76px;
+  min-width: 72px;
+  padding: 7px 6px 6px;
+  border: 1px solid var(--cf-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--cf-text-muted);
+  font-size: var(--cf-text-xs);
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    border-radius 220ms var(--cf-motion-emphasized),
+    border-color 180ms var(--cf-motion),
+    background 180ms var(--cf-motion),
+    color 180ms var(--cf-motion),
+    transform 180ms var(--cf-motion);
+}
+
+.cf-flow-form:hover:not(:disabled) { border-color: var(--cf-line-strong); color: var(--cf-text); transform: translateY(-1px); }
+.cf-flow-form:active:not(:disabled) { transform: scale(0.97); }
+
+.cf-flow-form.is-active {
+  border-color: transparent;
+  border-radius: 8px;
+  background: var(--cf-accent-container);
+  color: var(--md-sys-color-on-primary-container, #d7e8c8);
+}
+
+.cf-flow-form.is-active .cf-flow-shape { fill: color-mix(in srgb, var(--cf-accent) 42%, transparent); stroke: var(--cf-accent); }
+.cf-flow-form:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.cf-flow-fields { display: grid; gap: 9px; }
+
+.cf-node-inspector__actions { display: grid; gap: 6px; }
+.cf-node-inspector__actions .cf-field__label { color: var(--cf-text-muted); font-size: var(--cf-text-xs); }
+
+.cf-node-inspector__generated {
+  display: block;
+  overflow: hidden;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: var(--cf-surface-canvas);
+  color: var(--cf-text-muted);
+  font: var(--cf-text-xs)/1.5 var(--cf-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cf-node-inspector__toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cf-text-muted);
+  font-size: var(--cf-text-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cf-node-inspector__toggle:hover { color: var(--cf-accent); }
+
 .cf-conflict {
   display: flex;
   flex-direction: column;

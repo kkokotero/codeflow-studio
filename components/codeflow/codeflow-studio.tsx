@@ -12,6 +12,7 @@ import { ConsolePanel } from '@/components/codeflow/console-panel'
 import { DiagramExportDialog, ProjectExportDialog } from '@/components/codeflow/export-dialogs'
 import { FileTree, type FileTreeActions } from '@/components/codeflow/file-tree'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
+import { FlowNodeEditor } from '@/components/codeflow/flow-node-editor'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { HomeView } from '@/components/codeflow/home-view'
 import { NODE_LABELS, OPERATION_LABELS } from '@/components/codeflow/node-kinds'
@@ -229,7 +230,6 @@ export function CodeflowStudio() {
   const [historicalView, setHistoricalView] = useState<RunSnapshot | null>(null)
   const [manualEdges, setManualEdges] = useState<FlowCardEdge[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
-  const [sourceEdit, setSourceEdit] = useState('')
   const [sourceLineOriginal, setSourceLineOriginal] = useState('')
   const [mobilePane, setMobilePane] = useState<MobilePane>('editor')
   const [isImporting, setIsImporting] = useState(false)
@@ -445,7 +445,6 @@ export function CodeflowStudio() {
     setSelectedNodeId(nodeId)
     const sourceLine = displayCode.split('\n')[node.data.line - 1] ?? ''
     setSourceLineOriginal(sourceLine)
-    setSourceEdit(sourceLine)
     setMobilePane('editor')
     editorRef.current?.revealLineInCenter(node.data.line)
     editorRef.current?.setPosition({ lineNumber: node.data.line, column: 1 })
@@ -950,7 +949,7 @@ export function CodeflowStudio() {
     recordProgress({ type: 'reset' })
   }, [activeFile, recordProgress, starterTemplate, updateActiveCode])
 
-  const applySourceEdit = useCallback(() => {
+  const applySourceEdit = useCallback((nextLine: string) => {
     if (!selectedNode || historicalView || !activeFile) return
     const lines = activeFile.code.split('\n')
     const index = selectedNode.data.line - 1
@@ -958,12 +957,12 @@ export function CodeflowStudio() {
       setNotice('Conflicto de edición: la línea cambió en el editor. Recarga la versión actual antes de aplicar.')
       return
     }
-    lines[index] = sourceEdit
+    lines[index] = nextLine
     updateActiveCode(lines.join('\n'))
-    setSourceLineOriginal(sourceEdit)
+    setSourceLineOriginal(nextLine)
     recordProgress({ type: 'apply-edit' })
-    setNotice(`Línea ${selectedNode.data.line} sincronizada con el diagrama.`)
-  }, [activeFile, historicalView, recordProgress, selectedNode, sourceEdit, sourceLineOriginal, updateActiveCode])
+    setNotice(`${selectedNode.data.label} → línea ${selectedNode.data.line} sincronizada con el diagrama.`)
+  }, [activeFile, historicalView, recordProgress, selectedNode, sourceLineOriginal, updateActiveCode])
 
   const clearConsole = useCallback(() => {
     setLogs([])
@@ -1466,23 +1465,23 @@ export function CodeflowStudio() {
 
               <aside className={`cf-panel cf-inspector ${mobilePane === 'inspector' ? 'is-mobile-active' : ''}`} aria-label="Inspector">
                 {selectedNode ? (
-                  <NodeInspector
+                  <FlowNodeEditor
+                    pseudo={selectedNode.data.pseudo}
                     label={selectedNode.data.label}
                     kindLabel={selectedNode.data.kind === 'operation' && selectedNode.data.operationCategory
                       ? OPERATION_LABELS[selectedNode.data.operationCategory]
                       : NODE_LABELS[selectedNode.data.kind]}
+                    language={displayLanguage}
                     line={selectedNode.data.line}
                     detail={selectedNode.data.detail.split(' · ')[0]}
-                    value={sourceEdit}
-                    onChange={setSourceEdit}
-                    onApply={applySourceEdit}
-                    onClose={() => setSelectedNodeId(null)}
+                    originalLine={activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''}
                     readOnly={Boolean(historicalView)}
                     conflicted={Boolean(activeFile) && (activeFile!.code.split('\n')[selectedNode.data.line - 1] ?? '') !== sourceLineOriginal}
+                    onApply={applySourceEdit}
+                    onClose={() => setSelectedNodeId(null)}
                     onReloadLine={() => {
                       const currentLine = activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''
                       setSourceLineOriginal(currentLine)
-                      setSourceEdit(currentLine)
                     }}
                   />
                 ) : (
@@ -1861,71 +1860,6 @@ function HistoryList({ snapshots, selectedSnapshots, onOpen, onToggleCompare, co
       </ul>
       {compared.length === 2 && <SnapshotComparison snapshots={compared} />}
     </>
-  )
-}
-
-interface NodeInspectorProps {
-  label: string
-  kindLabel: string
-  line: number
-  detail: string
-  value: string
-  onChange: (value: string) => void
-  onApply: () => void
-  onClose: () => void
-  onReloadLine: () => void
-  readOnly: boolean
-  conflicted: boolean
-}
-
-/** Detalle del nodo seleccionado con edición de la línea de origen. */
-function NodeInspector({
-  label,
-  kindLabel,
-  line,
-  detail,
-  value,
-  onChange,
-  onApply,
-  onClose,
-  onReloadLine,
-  readOnly,
-  conflicted,
-}: NodeInspectorProps) {
-  return (
-    <div className="cf-node-inspector">
-      <div className="cf-pane-header">
-        <h2 className="cf-pane-title"><APP_ICONS.flow aria-hidden="true" />Nodo seleccionado</h2>
-        <Button variant="ghost" size="icon-xs" aria-label="Cerrar inspector de nodo" title="Cerrar" onClick={onClose}>
-          <X aria-hidden="true" />
-        </Button>
-      </div>
-      <div className="cf-node-inspector__body">
-        <span className="cf-chip">{kindLabel}</span>
-        <p className="cf-node-inspector__name">{label}</p>
-        <p className="cf-node-inspector__meta">Línea {line} · {detail}</p>
-        <label className="cf-field">
-          <span className="cf-field__label">Línea de origen</span>
-          <textarea
-            className="cf-field__input cf-field__input--code"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            rows={3}
-            spellCheck={false}
-            readOnly={readOnly}
-          />
-        </label>
-        {readOnly ? (
-          <p className="cf-node-inspector__note">Este snapshot es de solo lectura.</p>
-        ) : conflicted ? (
-          <div className="cf-conflict" role="alert">
-            <span>El editor modificó esta línea desde que abriste el nodo.</span>
-            <Button variant="ghost" size="sm" onClick={onReloadLine}>Cargar línea actual</Button>
-          </div>
-        ) : null}
-        <Button variant="default" size="sm" onClick={onApply} disabled={readOnly}>Aplicar al código</Button>
-      </div>
-    </div>
   )
 }
 

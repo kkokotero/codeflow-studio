@@ -1,4 +1,5 @@
 import { compactSource, emptyFlowFragment, FlowGraphBuilder, type FlowFragment, type FlowNodeInput } from '@/lib/flow-graph-builder'
+import { PSEUDO, pseudoExpression, pseudoLabel, pseudoStatement } from '@/lib/pseudo-code'
 import type { DiagramGraph, Language } from '@/lib/codeflow-types'
 
 interface SourceItem {
@@ -102,10 +103,10 @@ function functionName(header: string): string {
 
 function classLabel(header: string): string {
   const typed = header.match(/\b(class|struct|interface|enum|record|union|namespace|module|trait|impl|object)\s+([A-Za-z_]\w*)/i)
-  if (typed) return `${typed[1]} ${typed[2]}`
+  if (typed) return typed[2]
   const goType = header.match(/\btype\s+([A-Za-z_]\w*)/i)
-  if (goType) return `type ${goType[1]}`
-  return compactSource(header, 34)
+  if (goType) return goType[1]
+  return 'tipo'
 }
 
 function extractParentheses(text: string): string | null {
@@ -139,6 +140,7 @@ function parenthesesRange(text: string): { content: string; end: number } | null
 }
 
 function conditionExpression(header: string): string {
+  const isFor = /^(?:for|foreach)\b/i.test(header.trim())
   let text = header.trim()
     .replace(/^(?:else\s+)?if\b/i, '')
     .replace(/^elseif\b/i, '')
@@ -146,9 +148,17 @@ function conditionExpression(header: string): string {
     .replace(/\b(?:then|do)\s*$/i, '')
     .replace(/\s*\{\s*$/, '')
     .trim()
+  // Un `for` clásico lleva tres partes: solo importa la condición central.
+  if (isFor && text.includes(';')) {
+    const parts = text.split(';')
+    if (parts.length >= 2) text = parts[1].trim()
+  }
+  // Un rango numérico (`for i = 1, limite`) se lee como un recorrido.
+  const range = text.match(/^[A-Za-z_]\w*\s*=\s*[^,]+,\s*(.+)$/)
+  if (isFor && range) return `quedan elementos hasta ${pseudoExpression(range[1])}`
   text = extractParentheses(text) ?? text
   text = text.replace(/^\(|\)$/g, '').trim()
-  return compactSource(text || 'condición', 36)
+  return pseudoExpression(text || 'condición')
 }
 
 function isStructuralBrace(header: string): boolean {
@@ -491,38 +501,25 @@ function parseLuaBlocks(source: string): SourceBlock {
 function describeItem(item: SourceItem): { input: FlowNodeInput; abrupt: 'return' | 'break' | 'continue' | 'throw' | null } {
   const text = item.text
   const base = { line: item.line, source: text }
-  if (/^return\b/i.test(text)) {
-    return { input: { ...base, kind: 'return', label: compactSource(text), detail: 'Salida de función' }, abrupt: 'return' }
+  // Salida por flujo (`cout << valor`), que no es una llamada.
+  const stream = text.match(/(?:std::)?(?:cout|cerr)\s*<<\s*(.+?)\s*;?$/)
+  if (stream) {
+    const instruction = { form: 'print' as const, name: 'cout', value: pseudoExpression(stream[1]) }
+    return { input: { ...base, kind: 'io', label: PSEUDO.print(instruction.value), detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: instruction }, abrupt: null }
   }
-  if (/^break\b/i.test(text)) {
-    return { input: { ...base, kind: 'phase', label: 'break', detail: 'Salir del bucle o selección', phase: 'exit' }, abrupt: 'break' }
-  }
-  if (/^continue\b/i.test(text)) {
-    return { input: { ...base, kind: 'phase', label: 'continue', detail: 'Continuar con la siguiente iteración', phase: 'update' }, abrupt: 'continue' }
-  }
-  if (/^(?:throw|raise|panic)\b/i.test(text)) {
-    return { input: { ...base, kind: 'event', label: compactSource(text), detail: 'Salida por excepción' }, abrupt: 'throw' }
-  }
-  if (/^(?:import|package|include|using|use|mod|require|extern\s+crate)\b/i.test(text)) {
-    return { input: { ...base, kind: 'import', label: compactSource(text), detail: 'Proceso · cargar dependencia' }, abrupt: null }
-  }
-  if (IO_PATTERN.test(text)) {
-    const macroName = text.match(/\b([A-Za-z_]\w*!)\s*\(/)?.[1]
-    const callName = text.match(/([A-Za-z_]\w*(?:(?:\.|::|->)[A-Za-z_]\w*)*)\s*\(/)?.[1]
-    const name = macroName ?? callName ?? (/\bcout\b|\bstd::cout\b/.test(text) ? 'std::cout' : /\bcerr\b|\bstd::cerr\b/.test(text) ? 'std::cerr' : 'salida')
-    const input = INPUT_PATTERN.test(text)
-    return { input: { ...base, kind: 'io', label: `${input ? 'Entrada' : 'Salida'} · ${name}`, detail: 'Entrada / salida de datos', shape: 'input-output' }, abrupt: null }
-  }
-  if (/(?:^|[^\w])(?:[A-Za-z_]\w*|\w+\.\w+|[\w[\].]+)\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|:=|\+\+|--)/.test(text)) {
-    return { input: { ...base, kind: 'variable', label: compactSource(text), detail: 'Proceso · asignación' }, abrupt: null }
-  }
-  if (/^[A-Za-z_]\w*(?:\.|::|->)[A-Za-z_]\w*\s*\(/.test(text) || /^[A-Za-z_]\w*\s*\(/.test(text)) {
-    return { input: { ...base, kind: 'call', label: compactSource(text), detail: 'Proceso · llamada' }, abrupt: null }
-  }
-  if (/^(?:var|let|const|val|auto|final|static|int|long|float|double|bool|boolean|char|string|byte|short|unsigned|signed|size_t|void|[A-Z]\w*(?:<[^>]*>)?)\b/.test(text)) {
-    return { input: { ...base, kind: 'variable', label: compactSource(text), detail: 'Proceso · declaración' }, abrupt: null }
-  }
-  return { input: { ...base, kind: 'statement', label: compactSource(text), detail: 'Proceso · instrucción' }, abrupt: null }
+  const instruction = pseudoStatement(text)
+  const label = pseudoLabel(instruction)
+
+  if (instruction.form === 'return') return { input: { ...base, kind: 'return', label, detail: 'Salida de función', pseudo: instruction }, abrupt: 'return' }
+  if (instruction.form === 'break') return { input: { ...base, kind: 'phase', label, detail: 'Salir del bucle o selección', phase: 'exit', pseudo: instruction }, abrupt: 'break' }
+  if (instruction.form === 'continue') return { input: { ...base, kind: 'phase', label, detail: 'Continuar con la siguiente iteración', phase: 'update', pseudo: instruction }, abrupt: 'continue' }
+  if (instruction.form === 'throw') return { input: { ...base, kind: 'event', label, detail: 'Salida por excepción', pseudo: instruction }, abrupt: 'throw' }
+  if (instruction.form === 'import') return { input: { ...base, kind: 'import', label, detail: 'Proceso · cargar dependencia', pseudo: instruction }, abrupt: null }
+  if (instruction.form === 'print') return { input: { ...base, kind: 'io', label, detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: instruction }, abrupt: null }
+  if (instruction.form === 'read') return { input: { ...base, kind: 'io', label, detail: 'Entrada / salida de datos', shape: 'input-output', pseudo: instruction }, abrupt: null }
+  if (instruction.form === 'assign') return { input: { ...base, kind: 'variable', label, detail: 'Proceso · asignación', pseudo: instruction }, abrupt: null }
+  if (instruction.form === 'call') return { input: { ...base, kind: 'call', label, detail: 'Proceso · llamada', pseudo: instruction }, abrupt: null }
+  return { input: { ...base, kind: 'statement', label, detail: 'Proceso · instrucción', pseudo: instruction }, abrupt: null }
 }
 
 function buildItem(item: SourceItem, depth: number, builder: FlowGraphBuilder): FlowFragment {
@@ -567,12 +564,14 @@ function buildIf(
 ): FlowFragment {
   const header = headerOf(block)
   const line = lineOf(block)
+  const condition = conditionExpression(header)
   const decision = builder.addNode({
     kind: 'condition',
-    label: `¿${conditionExpression(header)}?`,
+    label: PSEUDO.condition(condition),
     line,
-    detail: isElseIfHeader(header) ? 'Decisión · else if' : 'Decisión · if',
+    detail: isElseIfHeader(header) ? 'Decisión · condición encadenada' : 'Decisión · condición',
     source: header,
+    pseudo: { form: 'condition', value: condition },
   }, depth)
   const yes = buildSequence(block.items, depth + 1, context, builder, language)
   const no = buildElseChain(elseBlocks, 0, depth + 1, context, builder, language)
@@ -627,24 +626,26 @@ function buildLoop(
     const conditionText = tail?.text ?? (/^repeat\b/i.test(header) ? 'hasta que termine' : 'condición final')
     const entry = builder.addNode({
       kind: 'phase',
-      label: /^repeat\b/i.test(header) ? 'Ejecutar cuerpo primero' : 'Ejecutar cuerpo primero',
+      label: 'Ejecutar cuerpo primero',
       line,
       detail: 'Bucle de condición posterior',
       phase: 'initialization',
     }, depth)
-    const condition = builder.addNode({
+    const condition = pseudoExpression(conditionText.replace(/^until\b/i, 'hasta'))
+    const conditionNode = builder.addNode({
       kind: 'loop',
-      label: `¿${conditionExpression(conditionText.replace(/^until\b/i, 'hasta'))}?`,
+      label: PSEUDO.loop(condition),
       line: tail?.line ?? line,
-      detail: /^repeat\b/i.test(header) ? 'Decisión · repetir hasta' : 'Decisión · do…while',
+      detail: /^repeat\b/i.test(header) ? 'Decisión · repetir hasta' : 'Decisión · iteración',
       source: tail?.text ?? header,
+      pseudo: { form: 'loop', value: condition },
     }, depth)
     const bodyEntry = body.entryId ?? builder.addNode({ kind: 'statement', label: 'Cuerpo vacío', line, detail: 'Sin instrucciones', phase: 'body' }, depth + 1)
     builder.addEdge(entry, bodyEntry, 'cuerpo · primera vuelta', 'body')
-    for (const id of body.entryId ? body.exitIds : [bodyEntry]) builder.addEdge(id, condition, 'evaluar condición', 'control')
-    for (const id of body.continueIds) builder.addEdge(id, condition, 'continue · evaluar', 'repeat')
-    builder.addEdge(condition, bodyEntry, 'verdadero · repetir', 'true')
-    builder.addEdge(condition, exit, 'falso · salir', 'false')
+    for (const id of body.entryId ? body.exitIds : [bodyEntry]) builder.addEdge(id, conditionNode, 'evaluar condición', 'control')
+    for (const id of body.continueIds) builder.addEdge(id, conditionNode, 'continue · evaluar', 'repeat')
+    builder.addEdge(conditionNode, bodyEntry, 'verdadero · repetir', 'true')
+    builder.addEdge(conditionNode, exit, 'falso · salir', 'false')
     for (const id of body.breakIds) builder.addEdge(id, exit, 'break · salir', 'exit')
     result.entryId = entry
     result.exitIds.push(exit)
@@ -653,20 +654,22 @@ function buildLoop(
     return result
   }
 
-  const condition = builder.addNode({
+  const condition = conditionExpression(header)
+  const conditionNode = builder.addNode({
     kind: 'loop',
-    label: `¿${conditionExpression(header)}?`,
+    label: PSEUDO.loop(condition),
     line,
-    detail: /^for\b/i.test(header) ? 'Decisión · iteración for' : /^while\b/i.test(header) ? 'Decisión · iteración while' : 'Decisión · iteración',
+    detail: 'Decisión · iteración',
     source: header,
+    pseudo: { form: 'loop', value: condition },
   }, depth)
   const bodyEntry = body.entryId ?? builder.addNode({ kind: 'statement', label: 'Cuerpo vacío', line, detail: 'Sin instrucciones', phase: 'body' }, depth + 1)
-  builder.addEdge(condition, bodyEntry, 'verdadero · cuerpo', 'true')
-  for (const id of body.entryId ? body.exitIds : [bodyEntry]) builder.addEdge(id, condition, 'repetir', 'repeat')
-  for (const id of body.continueIds) builder.addEdge(id, condition, 'continue', 'repeat')
-  builder.addEdge(condition, exit, 'falso · salir', 'false')
+  builder.addEdge(conditionNode, bodyEntry, 'verdadero · cuerpo', 'true')
+  for (const id of body.entryId ? body.exitIds : [bodyEntry]) builder.addEdge(id, conditionNode, 'repetir', 'repeat')
+  for (const id of body.continueIds) builder.addEdge(id, conditionNode, 'continue', 'repeat')
+  builder.addEdge(conditionNode, exit, 'falso · salir', 'false')
   for (const id of body.breakIds) builder.addEdge(id, exit, 'break · salir', 'exit')
-  result.entryId = condition
+  result.entryId = conditionNode
   result.exitIds.push(exit)
   result.returnIds.push(...body.returnIds)
   result.throwIds.push(...body.throwIds)
@@ -682,12 +685,14 @@ function buildSwitch(
 ): FlowFragment {
   const header = headerOf(block)
   const line = lineOf(block)
+  const selection = conditionExpression(header)
   const decision = builder.addNode({
     kind: 'condition',
-    label: `${/^match\b/i.test(header) ? 'match' : 'switch'} · ${conditionExpression(header)}`,
+    label: PSEUDO.condition(selection),
     line,
-    detail: 'Selección entre casos',
+    detail: 'Decisión · selección',
     source: header,
+    pseudo: { form: 'condition', value: selection },
   }, depth)
   const merge = builder.addConnector(line, depth, 'Continuación de selección')
   const result = emptyFlowFragment()
@@ -752,7 +757,7 @@ function buildFunction(
   const header = headerOf(block)
   const line = lineOf(block)
   const name = functionName(header)
-  const definition = builder.addNode({ kind: 'function', label: `Definir ${name}()`, line, detail: 'El cuerpo se muestra como subflujo', source: header }, depth)
+  const definition = builder.addNode({ kind: 'function', label: PSEUDO.define(name), line, detail: 'El cuerpo se muestra como subflujo', source: header, pseudo: { form: 'define', name } }, depth)
   const entry = builder.addNode({ kind: 'start', label: `Inicio · ${name}()`, line, detail: 'Entrada de función', shape: 'terminator' }, depth + 1)
   const exit = builder.addNode({ kind: 'end', label: `Fin · ${name}()`, line, detail: 'Salida de función', shape: 'terminator' }, depth + 1)
   builder.addEdge(definition, entry, 'cuerpo de función', 'data')
@@ -774,7 +779,8 @@ function buildClass(
 ): FlowFragment {
   const header = headerOf(block)
   const line = lineOf(block)
-  const definition = builder.addNode({ kind: 'class', label: classLabel(header), line, detail: 'Proceso · definir tipo', source: header }, depth)
+  const name = classLabel(header)
+  const definition = builder.addNode({ kind: 'class', label: PSEUDO.class(name), line, detail: 'Proceso · definir tipo', source: header, pseudo: { form: 'class', name } }, depth)
   for (const node of block.items) {
     if (isBlock(node) && isFunctionHeader(headerOf(node))) {
       const method = buildFunction(node, depth + 1, context, builder, language)
@@ -803,7 +809,7 @@ function buildTry(
   language: Language,
 ): FlowFragment {
   const line = lineOf(block)
-  const tryNode = builder.addNode({ kind: 'event', label: 'try · control de excepción', line, detail: 'Posible ruta de error', source: headerOf(block) }, depth)
+  const tryNode = builder.addNode({ kind: 'event', label: 'proteger', line, detail: 'Posible ruta de error', source: headerOf(block), pseudo: { form: 'statement', value: 'proteger' } }, depth)
   const body = buildSequence(block.items, depth + 1, context, builder, language)
   if (body.entryId) builder.addEdge(tryNode, body.entryId, 'ejecutar', 'body')
   const sources: Array<{ id: string; label: string; role: 'merge' | 'true' | 'false' | 'exit' }> = []
@@ -864,12 +870,14 @@ function buildInlineControl(
   if (!body.entryId) return null
 
   if (isIf) {
+    const condition = pseudoExpression(range.content)
     const decision = builder.addNode({
       kind: 'condition',
-      label: `¿${compactSource(range.content, 36)}?`,
+      label: PSEUDO.condition(condition),
       line: item.line,
-      detail: 'Decisión · if',
+      detail: 'Decisión · condición',
       source: text,
+      pseudo: { form: 'condition', value: condition },
     }, depth)
     const merge = builder.addConnector(item.line, depth)
     builder.addEdge(decision, body.entryId, 'verdadero', 'true')
@@ -882,21 +890,23 @@ function buildInlineControl(
     return result
   }
 
-  const condition = builder.addNode({
+  const condition = pseudoExpression(range.content)
+  const conditionNode = builder.addNode({
     kind: 'loop',
-    label: `¿${compactSource(range.content, 36)}?`,
+    label: PSEUDO.loop(condition),
     line: item.line,
     detail: 'Decisión · iteración',
     source: text,
+    pseudo: { form: 'loop', value: condition },
   }, depth)
   const exit = builder.addConnector(item.line, depth, 'Salida del bucle')
-  builder.addEdge(condition, body.entryId, 'verdadero · cuerpo', 'true')
-  for (const id of body.exitIds) builder.addEdge(id, condition, 'repetir', 'repeat')
-  for (const id of body.continueIds) builder.addEdge(id, condition, 'continue', 'repeat')
+  builder.addEdge(conditionNode, body.entryId, 'verdadero · cuerpo', 'true')
+  for (const id of body.exitIds) builder.addEdge(id, conditionNode, 'repetir', 'repeat')
+  for (const id of body.continueIds) builder.addEdge(id, conditionNode, 'continue', 'repeat')
   for (const id of body.breakIds) builder.addEdge(id, exit, 'break · salir', 'exit')
-  builder.addEdge(condition, exit, 'falso · salir', 'false')
+  builder.addEdge(conditionNode, exit, 'falso · salir', 'false')
   const result = emptyFlowFragment()
-  result.entryId = condition
+  result.entryId = conditionNode
   result.exitIds.push(exit)
   result.returnIds.push(...body.returnIds)
   result.throwIds.push(...body.throwIds)

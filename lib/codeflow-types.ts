@@ -21,6 +21,43 @@ export interface CodeFile {
   templateId?: string
 }
 
+/**
+ * Formas de instrucción del pseudo-código común a todos los lenguajes.
+ *
+ * Cada nodo del diagrama guarda su forma y sus operandos: con eso el
+ * inspector puede editarlos como un formulario y reconstruir la instrucción
+ * en el lenguaje del archivo.
+ */
+export type PseudoForm =
+  | 'assign'
+  | 'call'
+  | 'print'
+  | 'read'
+  | 'return'
+  | 'throw'
+  | 'import'
+  | 'define'
+  | 'class'
+  | 'condition'
+  | 'loop'
+  | 'break'
+  | 'continue'
+  | 'statement'
+
+export interface PseudoInstruction {
+  form: PseudoForm
+  /** Expresión principal: el valor, la condición o los argumentos. */
+  value?: string
+  /** Destino de una asignación o de una lectura. */
+  target?: string
+  /** Tipo declarado del destino, cuando el lenguaje lo escribe delante. */
+  type?: string
+  /** Nombre de la función, del módulo o del tipo. */
+  name?: string
+  /** Operador original de una asignación compuesta. */
+  operator?: string
+}
+
 export interface FlowCardData extends Record<string, unknown> {
   label: string
   kind: NodeKind
@@ -34,6 +71,8 @@ export interface FlowCardData extends Record<string, unknown> {
   operationId?: string
   operationCategory?: OperationCategory
   phase?: 'initialization' | 'condition' | 'body' | 'update' | 'exit' | 'merge' | 'branch'
+  /** La instrucción con el vocabulario común, para editar el flujo. */
+  pseudo?: PseudoInstruction
 }
 
 export type FlowCardNode = Node<FlowCardData, 'flowCard'>

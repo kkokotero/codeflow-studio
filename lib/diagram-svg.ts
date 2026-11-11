@@ -184,8 +184,8 @@ function drawNode(node: FlowCardNode, palette: DiagramPalette): string {
   const labelBaseline = centered ? y + height / 2 : y + 40
   // El rombo se estrecha hacia arriba y abajo: su texto necesita más margen.
   const narrow = shape === 'decision'
-  const maxChars = centered ? Math.floor(width / (narrow ? 9 : 6.4)) : Math.floor((width - 28) / 6.4)
-  const labelSize = narrow ? 11 : 12
+  const maxChars = centered ? Math.floor(width / (narrow ? 9 : shape === 'input-output' ? 7 : 6.4)) : Math.floor((width - 28) / 6.4)
+  const labelSize = narrow || shape === 'input-output' ? 11 : 12
   parts.push(`<text x="${textX}" y="${labelBaseline}" text-anchor="${anchor}" font-family="${palette.mono}" font-size="${labelSize}" fill="${palette.text}">${escapeXml(shorten(label, maxChars))}</text>`)
 
   if (detail) {

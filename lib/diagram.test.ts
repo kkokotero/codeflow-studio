@@ -151,6 +151,31 @@ describe('analyzeCode', () => {
     expect(nodesOfKind(graph, 'operation')).toHaveLength(0)
   })
 
+  it('speaks the same pseudo-code in every language', () => {
+    const javascript = analyzeCode('const total = 0\nconsole.log(total)\n', 'javascript')
+    const python = analyzeCode('total = 0\nprint(total)\n', 'python')
+    const go = analyzeCode('package main\n\nimport "fmt"\n\nfunc main() {\n\ttotal := 0\n\tfmt.Println(total)\n}\n', 'go')
+    const labels = (graph: ReturnType<typeof analyzeCode>) => graph.nodes.map((node) => node.data.label)
+
+    for (const graph of [javascript, python, go]) {
+      expect(graph.error).toBeUndefined()
+      expect(labels(graph)).toContain('total ← 0')
+      expect(labels(graph)).toContain('imprimir(total)')
+    }
+  })
+
+  it('keeps the operands of every node so the flow can be edited', () => {
+    const graph = analyzeCode('const total = 0\nif (total > 0) { console.log(total) }\n', 'javascript')
+    const assignment = nodesOfKind(graph, 'variable')[0]
+    const condition = nodesOfKind(graph, 'condition')[0]
+
+    expect(assignment.data.pseudo?.form).toBe('assign')
+    expect(assignment.data.pseudo?.target).toBe('total')
+    expect(assignment.data.pseudo?.value).toBe('0')
+    expect(condition.data.pseudo?.form).toBe('condition')
+    expect(condition.data.pseudo?.value).toBe('total > 0')
+  })
+
   it('keeps Python for-else and break routes distinct', () => {
     const graph = analyzeCode('def search(items):\n    for item in items:\n        if item:\n            break\n    else:\n        print("empty")', 'python')
 
@@ -188,10 +213,10 @@ describe('analyzeCode', () => {
 
   it('preserves sequential statements and return routes in Python class methods', () => {
     const graph = analyzeCode('class Counter:\n    def __init__(self, start):\n        self.value = start\n        self.value += 1\n        return\n    def value_now(self):\n        return self.value', 'python')
-    const init = nodesOfKind(graph, 'function').find((node) => node.data.label === 'Definir __init__()')
-    const getter = nodesOfKind(graph, 'function').find((node) => node.data.label === 'Definir value_now()')
-    const assignment = nodesOfKind(graph, 'variable').find((node) => node.data.label.includes('self.value = start'))
-    const update = nodesOfKind(graph, 'variable').find((node) => node.data.label.includes('self.value += 1'))
+    const init = nodesOfKind(graph, 'function').find((node) => node.data.label === 'definir __init__()')
+    const getter = nodesOfKind(graph, 'function').find((node) => node.data.label === 'definir value_now()')
+    const assignment = nodesOfKind(graph, 'variable').find((node) => node.data.label.includes('self.value ← start'))
+    const update = nodesOfKind(graph, 'variable').find((node) => node.data.label.includes('self.value ← self.value + 1'))
     const initReturn = nodesOfKind(graph, 'return').find((node) => node.data.line === 5)
 
     expect(graph.error).toBeUndefined()
@@ -216,8 +241,8 @@ describe('analyzeCode', () => {
   it('routes JavaScript do-while entry, continue, repeat, and exit paths', () => {
     const graph = analyzeCode('let index = 0\ndo {\n  index++\n  if (index < limit) continue\n} while (index < limit)', 'javascript')
     const entry = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'Ejecutar cuerpo primero')
-    const loop = nodesOfKind(graph, 'loop').find((node) => node.data.detail === 'Decisión · do…while')
-    const continueNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'continue')
+    const loop = nodesOfKind(graph, 'loop')[0]
+    const continueNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'siguiente iteración')
 
     expect(graph.error).toBeUndefined()
     expect(entry).toBeDefined()
@@ -232,8 +257,8 @@ describe('analyzeCode', () => {
   it('routes Python break and continue to their loop destinations', () => {
     const graph = analyzeCode('def iterate(items):\n    for item in items:\n        if item is None:\n            continue\n        if item == 0:\n            break\n        process(item)\n    return', 'python')
     const loop = nodesOfKind(graph, 'loop')[0]
-    const continueNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'continue')
-    const breakNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'break')
+    const continueNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'siguiente iteración')
+    const breakNode = nodesOfKind(graph, 'phase').find((node) => node.data.label === 'salir del bucle')
     const loopExitEdge = graph.edges.find((edge) => edge.source === loop.id && edge.data?.role === 'false')
     const breakEdge = graph.edges.find((edge) => edge.source === breakNode?.id && edge.data?.role === 'exit')
 
