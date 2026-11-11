@@ -13,6 +13,7 @@ import {
 
 import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { PageHeader } from '@/components/codeflow/page-header'
+import { ProgressRing } from '@/components/codeflow/progress-ring'
 import {
   ACHIEVEMENTS,
   ACHIEVEMENT_CATEGORIES,
@@ -59,8 +60,10 @@ function AchievementCard({ achievement, profile }: { achievement: AchievementDef
         <span style={{ width: `${percentage}%` }} />
       </div>
     )}
-    <div className="cf-achievement-card__condition"><span>Condición</span>{achievement.condition}</div>
-    <div className="cf-achievement-card__hint"><span>Pista</span>{achievement.hint}</div>
+    <div className="cf-achievement-card__notes">
+      <div className="cf-achievement-card__condition"><span>Condición</span>{achievement.condition}</div>
+      <div className="cf-achievement-card__hint"><span>Pista</span>{achievement.hint}</div>
+    </div>
     <div className="cf-achievement-card__footer">
       {status === 'unlocked' ? <span className="cf-achievement-card__earned"><Check aria-hidden="true" /> Desbloqueado</span> : (
         <span className="cf-achievement-card__progress-label">
@@ -80,6 +83,10 @@ interface AchievementsViewProps {
 /**
  * Progresión y logros con el mismo lenguaje visual que el estudio: mismas
  * superficies, mismos bordes y el mismo acento para el progreso.
+ *
+ * El contenido ocupa todo el ancho disponible: la rejilla de logros se
+ * adapta al espacio con columnas automáticas, de modo que nunca queda una
+ * franja vacía a la derecha ni tarjetas comprimidas.
  */
 export function AchievementsView({ profile, onBack, onRename }: AchievementsViewProps) {
   const [category, setCategory] = useState<'Todos' | AchievementCategory>('Todos')
@@ -111,9 +118,18 @@ export function AchievementsView({ profile, onBack, onRename }: AchievementsView
           description="Cada intento cuenta. Sigue construyendo tu camino."
           aside={(
             <div className="cf-achievements__completion">
-              <span>Colección</span>
-              <strong>{completion}%</strong>
-              <small>{unlockedCount} de {ACHIEVEMENTS.length} logros</small>
+              <ProgressRing
+                value={completion / 100}
+                size={86}
+                stroke={8}
+                label={`Colección completada: ${completion}%`}
+              >
+                <strong>{completion}%</strong>
+              </ProgressRing>
+              <div className="cf-achievements__completion-copy">
+                <span>Colección</span>
+                <small>{unlockedCount} de {ACHIEVEMENTS.length} logros</small>
+              </div>
             </div>
           )}
         />

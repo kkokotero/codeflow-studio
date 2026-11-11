@@ -3,6 +3,8 @@
 import { useMemo } from 'react'
 
 import { APP_ICONS } from '@/components/codeflow/app-icons'
+import { PageHeader } from '@/components/codeflow/page-header'
+import { ProgressRing } from '@/components/codeflow/progress-ring'
 import { Button } from '@/components/ui/button'
 import {
   Menu,
@@ -15,7 +17,6 @@ import {
 } from '@/components/ui/menu'
 import { ACHIEVEMENTS, getLevelProgress, type AchievementProfile } from '@/lib/achievements'
 import type { Project } from '@/lib/storage'
-import { PageHeader } from '@/components/codeflow/page-header'
 
 interface HomeViewProps {
   projects: Project[]
@@ -45,6 +46,10 @@ function relativeDate(timestamp: number): string {
  * Es el punto de entrada al estudio: elegir un proyecto para abrirlo, crear
  * otro nuevo o consultar los logros. También es válida sin ningún proyecto:
  * la lista vacía ofrece las mismas acciones en lugar de un error.
+ *
+ * La composición imita la de una app de escritorio: un título grande, una
+ * franja de resumen con las cifras del espacio de trabajo y las tarjetas de
+ * proyecto como objetos principales, con la progresión en una columna lateral.
  */
 export function HomeView({
   projects,
@@ -93,6 +98,25 @@ export function HomeView({
             )}
           />
 
+          <dl className="cf-summary" aria-label="Resumen del espacio de trabajo">
+            <div className="cf-summary__item">
+              <dt><APP_ICONS.folder aria-hidden="true" /> Proyectos</dt>
+              <dd>{projects.length}</dd>
+            </div>
+            <div className="cf-summary__item">
+              <dt><APP_ICONS.code aria-hidden="true" /> Archivos</dt>
+              <dd>{totalFiles}</dd>
+            </div>
+            <div className="cf-summary__item">
+              <dt><APP_ICONS.newFolder aria-hidden="true" /> Carpetas</dt>
+              <dd>{totalFolders}</dd>
+            </div>
+            <div className="cf-summary__item">
+              <dt><APP_ICONS.trophy aria-hidden="true" /> Experiencia</dt>
+              <dd>{(profile?.xp ?? 0).toLocaleString('es')} <small>XP</small></dd>
+            </div>
+          </dl>
+
           {sorted.length === 0 ? (
             <div className="cf-empty cf-empty--home">
               <span className="cf-empty__glyph"><APP_ICONS.home aria-hidden="true" /></span>
@@ -121,16 +145,16 @@ export function HomeView({
                       <span className="cf-project-card__icon" aria-hidden="true"><APP_ICONS.folder /></span>
                       <div className="cf-project-card__body">
                         <h2>{project.name}</h2>
-                        <p>
-                          <span className="cf-project-card__meta">
+                        <p className="cf-project-card__meta">
+                          <span className="cf-chip cf-chip--quiet">
                             {project.files.length} archivo{project.files.length === 1 ? '' : 's'}
                           </span>
                           {folderCount > 0 && (
-                            <span className="cf-project-card__meta">
+                            <span className="cf-chip cf-chip--quiet">
                               {folderCount} carpeta{folderCount === 1 ? '' : 's'}
                             </span>
                           )}
-                          <span className="cf-project-card__meta cf-project-card__meta--time">{relativeDate(project.updatedAt)}</span>
+                          <span className="cf-chip cf-chip--quiet cf-chip--time">{relativeDate(project.updatedAt)}</span>
                         </p>
                       </div>
                       <div className="cf-project-card__actions">
@@ -172,7 +196,7 @@ export function HomeView({
         </section>
 
         <aside className="cf-home__side" aria-label="Progresión">
-          <section className="cf-home__panel">
+          <section className="cf-home__panel cf-home__panel--progress">
             <div className="cf-home__panel-title">
               <span className="cf-level__emblem" aria-hidden="true"><APP_ICONS.trophy /></span>
               <div>
@@ -181,16 +205,21 @@ export function HomeView({
               </div>
             </div>
             {level && (
-              <>
-                <div className="cf-level__numbers">
-                  <span><strong>{profile?.xp.toLocaleString('es') ?? 0}</strong> XP acumulados</span>
-                  <span>Nivel {level.level}</span>
+              <div className="cf-home__ring">
+                <ProgressRing
+                  value={level.progress}
+                  size={96}
+                  stroke={9}
+                  label={`Nivel ${level.level}: ${level.earnedAtLevel} de ${level.nextLevelXp} XP`}
+                >
+                  <strong>{level.level}</strong>
+                  <small>nivel</small>
+                </ProgressRing>
+                <div className="cf-home__ring-copy">
+                  <strong>{profile?.xp.toLocaleString('es') ?? 0} XP</strong>
+                  <span>{level.earnedAtLevel} / {level.nextLevelXp} XP para el nivel {level.level + 1}</span>
                 </div>
-                <div className="cf-level__bar" role="progressbar" aria-label="Progreso al siguiente nivel" aria-valuenow={level.earnedAtLevel} aria-valuemin={0} aria-valuemax={level.nextLevelXp}>
-                  <span style={{ width: `${level.progress * 100}%` }} />
-                </div>
-                <p className="cf-home__hint">{level.earnedAtLevel} / {level.nextLevelXp} XP para el nivel {level.level + 1}</p>
-              </>
+              </div>
             )}
             <div className="cf-home__badges" aria-label="Insignias conseguidas">
               {badges.length === 0 ? (

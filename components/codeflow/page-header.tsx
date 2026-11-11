@@ -17,24 +17,30 @@ interface PageHeaderProps {
 /**
  * Cabecera común de las vistas de página (proyectos y logros).
  *
- * Comparte la misma jerarquía, el mismo acento y el mismo espacio, para que
- * cambiar de vista no parezca cambiar de aplicación.
+ * Sigue la jerarquía de las apps de Apple: un antetítulo pequeño, un título
+ * grande con tracking cerrado y una descripción breve. Las acciones viven a la
+ * derecha y el bloque `aside` es siempre lo último, de modo que el elemento
+ * más destacado de la vista se lee primero al entrar.
  */
 export function PageHeader({ eyebrow, title, description, actions, aside, back }: PageHeaderProps) {
   return (
     <header className="cf-page-header">
-      <div className="cf-page-header__intro">
+      <div className="cf-page-header__main">
         {back && (
           <Button variant="ghost" size="sm" onClick={back.onClick} className="cf-back-button">
             <APP_ICONS.back aria-hidden="true" />{back.label}
           </Button>
         )}
-        <span className="cf-page-header__eyebrow">{eyebrow}</span>
-        <h1>{title}</h1>
-        {description ? <p>{description}</p> : null}
+        <div className="cf-page-header__intro">
+          <span className="cf-page-header__eyebrow">{eyebrow}</span>
+          <h1>{title}</h1>
+          {description ? <p>{description}</p> : null}
+        </div>
       </div>
-      {actions ? <div className="cf-page-header__actions">{actions}</div> : null}
-      {aside ? <div className="cf-page-header__aside">{aside}</div> : null}
+      <div className="cf-page-header__trailing">
+        {actions ? <div className="cf-page-header__actions">{actions}</div> : null}
+        {aside ? <div className="cf-page-header__aside">{aside}</div> : null}
+      </div>
     </header>
   )
 }
