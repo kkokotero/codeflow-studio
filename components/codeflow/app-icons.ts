@@ -22,6 +22,7 @@ import {
   GitBranch,
   History,
   House,
+  Info,
   Keyboard,
   Layers3,
   ListTree,
@@ -33,6 +34,7 @@ import {
   Pencil,
   Play,
   Repeat2,
+  ScanSearch,
   Sun,
   Terminal,
   Trash2,
@@ -40,6 +42,7 @@ import {
   Undo2,
   Upload,
   Variable,
+  X,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
@@ -79,6 +82,9 @@ export const APP_ICONS = {
   help: Keyboard,
   trophy: Trophy,
   back: ArrowLeft,
+  info: Info,
+  close: X,
+  analysis: ScanSearch,
 
   // Paneles y destinos
   code: FileCode2,

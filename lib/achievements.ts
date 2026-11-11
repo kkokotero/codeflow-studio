@@ -74,6 +74,21 @@ export interface AchievementStats {
   sourceLineEdits: number
   resets: number
   activeDays: string[]
+  diagramImageExports: number
+  projectArchiveExports: number
+  projectsCreated: number
+  projectsDeleted: number
+  foldersCreated: number
+  filesMoved: number
+  filesRenamed: number
+  filesDuplicated: number
+  folderImports: number
+  layoutAdjustments: number
+  consoleCopies: number
+  outputComparisons: number
+  symbolNavigations: number
+  projectsVisited: number
+  emptyWorkspaceVisits: number
 }
 
 export interface AchievementProfile {
@@ -109,9 +124,16 @@ export type AchievementActivity =
   | { type: 'run-failure' }
   | { type: 'run-success'; language: Language; output: string; nodeCount: number; nodeKinds: string[]; code?: string }
   | { type: 'explore'; feature: 'diagram' | 'file' | 'import' | 'language' | 'help' }
+  | { type: 'organize'; action: 'folder-created' | 'file-moved' | 'file-renamed' | 'file-duplicated' | 'folder-imported' }
+  | { type: 'project'; action: 'created' | 'deleted' | 'visited' | 'archived' | 'empty' }
+  | { type: 'console'; action: 'copied' | 'compared' }
+  | { type: 'symbol'; action: 'navigated' }
+  | { type: 'layout'; action: 'adjusted' }
   | { type: 'inspector'; tab: 'symbols' | 'history' }
   | { type: 'snapshot' }
   | { type: 'export'; target: 'file' | 'project' | 'diagram' }
+  | { type: 'export-diagram-image'; format: 'svg' | 'png' }
+  | { type: 'export-project-archive'; format: 'codeflow' | 'zip' }
   | { type: 'apply-edit' }
   | { type: 'reset' }
   | { type: 'clear-console' }
@@ -190,6 +212,21 @@ export function createAchievementStats(): AchievementStats {
     sourceLineEdits: 0,
     resets: 0,
     activeDays: [],
+    diagramImageExports: 0,
+    projectArchiveExports: 0,
+    projectsCreated: 0,
+    projectsDeleted: 0,
+    foldersCreated: 0,
+    filesMoved: 0,
+    filesRenamed: 0,
+    filesDuplicated: 0,
+    folderImports: 0,
+    layoutAdjustments: 0,
+    consoleCopies: 0,
+    outputComparisons: 0,
+    symbolNavigations: 0,
+    projectsVisited: 0,
+    emptyWorkspaceVisits: 0,
   }
 }
 
@@ -618,6 +655,24 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   flag({ id: 'help-opened', name: 'Curioso', description: 'Abre la ayuda y los atajos de teclado.', hint: 'Pulsa el icono de teclado en la barra superior.', condition: 'Abrir el diálogo de ayuda.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Lightbulb' }, (stats) => stats.helpOpened),
   counter({ id: 'inspector-tabs-2', name: 'Inspector completo', description: 'Visita las dos pestañas del inspector.', hint: 'Revisa Símbolos e Historial en el panel derecho.', condition: 'Abrir las pestañas de símbolos e historial.', category: 'Exploración', difficulty: 'Intermedio', xp: 25, icon: 'ScanSearch' }, (stats) => stats.inspectorTabsUsed.length, 2),
 
+  flag({ id: 'folder-created', name: 'Creador de carpetas', description: 'Crea tu primera carpeta en el explorador.', hint: 'Usa el botón de carpeta junto a «Explorador» o el menú de una carpeta.', condition: 'Crear una carpeta en un proyecto.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'FolderOpen' }, (stats) => stats.foldersCreated >= 1),
+  flag({ id: 'file-moved', name: 'Reordenador', description: 'Mueve un archivo a otra carpeta.', hint: 'Abre el menú de un archivo y elige «Mover a…».', condition: 'Mover un archivo de carpeta.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Layers' }, (stats) => stats.filesMoved >= 1),
+  flag({ id: 'file-renamed', name: 'Renombrador', description: 'Cambia el nombre de un archivo o de una carpeta.', hint: 'El menú de cada fila del explorador permite renombrar.', condition: 'Renombrar un archivo o una carpeta.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'FilePlus2' }, (stats) => stats.filesRenamed >= 1),
+  flag({ id: 'file-duplicated', name: 'Gemelo', description: 'Duplica un archivo para trabajar sobre una copia.', hint: 'Elige «Duplicar» en el menú de un archivo.', condition: 'Duplicar un archivo.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Copy' }, (stats) => stats.filesDuplicated >= 1),
+  flag({ id: 'folder-imported', name: 'Excavador', description: 'Importa una carpeta completa del disco.', hint: 'En el menú «Más acciones» elige «Importar carpeta…».', condition: 'Importar una carpeta con código.', category: 'Exploración', difficulty: 'Intermedio', xp: 30, icon: 'Upload' }, (stats) => stats.folderImports >= 1),
+  flag({ id: 'projects-visited', name: 'Curioso de proyectos', description: 'Vuelve a la vista de proyectos.', hint: 'Pulsa la marca de la barra superior.', condition: 'Abrir la vista de proyectos.', category: 'Exploración', difficulty: 'Inicial', xp: 10, icon: 'Compass' }, (stats) => stats.projectsVisited >= 1),
+  flag({ id: 'empty-workspace', name: 'Página en blanco', description: 'Explora el estudio sin ningún proyecto.', hint: 'Elimina todos los proyectos y quédate en la vista de proyectos.', condition: 'Tener la lista de proyectos vacía.', category: 'Exploración', difficulty: 'Intermedio', xp: 25, icon: 'Sparkles' }, (stats) => stats.emptyWorkspaceVisits >= 1),
+  flag({ id: 'layout-adjusted', name: 'Arquitecto de espacio', description: 'Redimensiona los paneles del estudio.', hint: 'Arrastra los separadores con los puntos de agarre.', condition: 'Ajustar el tamaño de un panel.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Workflow' }, (stats) => stats.layoutAdjustments >= 1),
+  flag({ id: 'console-copied', name: 'Portapapeles', description: 'Copia la salida de la consola.', hint: 'Usa el botón de copiar en la cabecera de la consola.', condition: 'Copiar la salida del programa.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Terminal' }, (stats) => stats.consoleCopies >= 1),
+  flag({ id: 'output-comparison', name: 'Comparador', description: 'Compara la salida de dos ejecuciones.', hint: 'En «Historial» marca dos ejecuciones para compararlas.', condition: 'Comparar dos salidas guardadas.', category: 'Exploración', difficulty: 'Intermedio', xp: 30, icon: 'GitCommitHorizontal' }, (stats) => stats.outputComparisons >= 1),
+  flag({ id: 'symbol-navigation', name: 'Lector de símbolos', description: 'Salta a un símbolo desde la lista del inspector.', hint: 'En la pestaña «Símbolos» pulsa cualquier entrada.', condition: 'Navegar a un símbolo desde el inspector.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'ScanSearch' }, (stats) => stats.symbolNavigations >= 1),
+  counter({ id: 'diagram-image-1', name: 'Imagen del flujo', description: 'Exporta el diagrama como SVG o PNG.', hint: 'En el panel «Flujo» elige «Exportar diagrama…».', condition: 'Exportar un diagrama en imagen.', category: 'Dominio', difficulty: 'Fácil', xp: 20, icon: 'Download' }, (stats) => stats.diagramImageExports, 1),
+  counter({ id: 'diagram-image-5', name: 'Galería de flujos', description: 'Exporta cinco diagramas en imagen.', hint: 'Cada exportación en SVG o PNG cuenta.', condition: 'Exportar 5 diagramas en imagen.', category: 'Dominio', difficulty: 'Intermedio', xp: 45, icon: 'Download' }, (stats) => stats.diagramImageExports, 5),
+  flag({ id: 'project-archived', name: 'Empaquetador', description: 'Exporta un proyecto en ZIP con sus diagramas.', hint: 'En el menú del proyecto elige «Exportar proyecto…» y luego ZIP.', condition: 'Exportar un proyecto como ZIP.', category: 'Dominio', difficulty: 'Intermedio', xp: 35, icon: 'FolderOpen' }, (stats) => stats.projectArchiveExports >= 1),
+  flag({ id: 'project-created', name: 'Fundador', description: 'Crea un proyecto nuevo desde cero.', hint: 'En la vista de proyectos, «Nuevo proyecto».', condition: 'Crear un proyecto.', category: 'Dominio', difficulty: 'Fácil', xp: 20, icon: 'Sparkles' }, (stats) => stats.projectsCreated >= 1),
+  counter({ id: 'projects-created-3', name: 'Cartera de proyectos', description: 'Crea tres proyectos distintos.', hint: 'Cada proyecto nuevo suma uno.', condition: 'Crear 3 proyectos.', category: 'Dominio', difficulty: 'Intermedio', xp: 40, icon: 'Layers' }, (stats) => stats.projectsCreated, 3),
+  counter({ id: 'folder-tiers-3', name: 'Estructura propia', description: 'Crea tres carpetas en tus proyectos.', hint: 'Agrupa tu código en carpetas del explorador.', condition: 'Crear 3 carpetas.', category: 'Dominio', difficulty: 'Intermedio', xp: 30, icon: 'FolderOpen' }, (stats) => stats.foldersCreated, 3),
+
   counter({ id: 'steady', name: 'Constancia', description: 'Completa tres ejecuciones correctas seguidas.', hint: 'Cada ejecución correcta consecutiva suma; un error reinicia la racha.', condition: 'Completar 3 ejecuciones correctas consecutivas.', category: 'Constancia', difficulty: 'Intermedio', xp: 45, icon: 'Flame' }, (stats) => stats.consecutiveSuccessfulRuns, 3),
   ...streakTiers,
   ...activeDayTiers,
@@ -764,6 +819,34 @@ export function recordAchievementActivity(profile: AchievementProfile, activity:
     if (activity.target === 'project') stats.projectExports += 1
     if (activity.target === 'diagram') stats.diagramExports += 1
   }
+
+  if (activity.type === 'organize') {
+    if (activity.action === 'folder-created') stats.foldersCreated += 1
+    if (activity.action === 'file-moved') stats.filesMoved += 1
+    if (activity.action === 'file-renamed') stats.filesRenamed += 1
+    if (activity.action === 'file-duplicated') stats.filesDuplicated += 1
+    if (activity.action === 'folder-imported') stats.folderImports += 1
+  }
+
+  if (activity.type === 'project') {
+    if (activity.action === 'created') stats.projectsCreated += 1
+    if (activity.action === 'deleted') stats.projectsDeleted += 1
+    if (activity.action === 'archived') stats.projectArchiveExports += 1
+    if (activity.action === 'visited') stats.projectsVisited += 1
+    if (activity.action === 'empty') stats.emptyWorkspaceVisits += 1
+  }
+
+  if (activity.type === 'console') {
+    if (activity.action === 'copied') stats.consoleCopies += 1
+    if (activity.action === 'compared') stats.outputComparisons += 1
+  }
+
+  if (activity.type === 'symbol' && activity.action === 'navigated') stats.symbolNavigations += 1
+
+  if (activity.type === 'layout') stats.layoutAdjustments += 1
+
+  if (activity.type === 'export-diagram-image') stats.diagramImageExports += 1
+  if (activity.type === 'export-project-archive') stats.projectArchiveExports += 1
 
   if (activity.type === 'apply-edit') stats.sourceLineEdits += 1
   if (activity.type === 'reset') stats.resets += 1

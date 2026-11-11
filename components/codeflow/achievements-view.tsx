@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 
 import { APP_ICONS } from '@/components/codeflow/app-icons'
-import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/codeflow/page-header'
 import {
   ACHIEVEMENTS,
   ACHIEVEMENT_CATEGORIES,
@@ -104,21 +104,19 @@ export function AchievementsView({ profile, onBack, onRename }: AchievementsView
   return (
     <div className="cf-achievements">
       <div className="cf-achievements__scroll">
-        <header className="cf-achievements__heading">
-          <div className="cf-achievements__intro">
-            <Button variant="ghost" size="sm" onClick={onBack} className="cf-back-button">
-              <APP_ICONS.back aria-hidden="true" />Volver a los proyectos
-            </Button>
-            <span className="cf-achievements__eyebrow"><APP_ICONS.trophy aria-hidden="true" /> Ruta de aprendizaje</span>
-            <h1>Logros y progresión</h1>
-            <p>Cada intento cuenta. Sigue construyendo tu camino.</p>
-          </div>
-          <div className="cf-achievements__completion">
-            <span>Colección</span>
-            <strong>{completion}%</strong>
-            <small>{unlockedCount} de {ACHIEVEMENTS.length} logros</small>
-          </div>
-        </header>
+        <PageHeader
+          back={{ label: 'Volver a los proyectos', onClick: onBack }}
+          eyebrow={<><APP_ICONS.trophy aria-hidden="true" /> Ruta de aprendizaje</>}
+          title="Logros y progresión"
+          description="Cada intento cuenta. Sigue construyendo tu camino."
+          aside={(
+            <div className="cf-achievements__completion">
+              <span>Colección</span>
+              <strong>{completion}%</strong>
+              <small>{unlockedCount} de {ACHIEVEMENTS.length} logros</small>
+            </div>
+          )}
+        />
 
         <section className="cf-level" aria-label="Perfil y experiencia">
           <div className="cf-level__identity">

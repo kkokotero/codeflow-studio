@@ -147,6 +147,31 @@ export function useMaterialTheme() {
 
     Object.entries(materialRoles).forEach(([name, value]) => setColorToken(name, value))
 
+    // Colores de nodos y flechas en hexadecimal: se resuelven al exportar.
+    setColorToken('--node-function', scheme.primary)
+    setColorToken('--node-variable', scheme.secondary)
+    setColorToken('--node-condition', scheme.tertiary)
+    setColorToken('--node-loop', scheme.tertiaryContainer)
+    setColorToken('--node-class', scheme.primaryContainer)
+    setColorToken('--node-call', scheme.secondaryContainer)
+    setColorToken('--node-return', scheme.error)
+    setColorToken('--node-import', scheme.outline)
+    setColorToken('--node-statement', scheme.onSurfaceVariant)
+    setColorToken('--node-operation', scheme.secondary)
+    setColorToken('--node-phase', scheme.tertiary)
+    setColorToken('--cf-edge-control', scheme.onSurfaceVariant)
+    setColorToken('--cf-edge-data', scheme.secondary)
+    setColorToken('--cf-edge-true', scheme.primary)
+    setColorToken('--cf-edge-false', scheme.error)
+    setColorToken('--cf-edge-repeat', scheme.tertiaryContainer)
+    setColorToken('--cf-edge-exit', scheme.tertiary)
+    setColorToken('--cf-edge-body', scheme.outline)
+    setColorToken('--cf-edge-operand', scheme.secondary)
+    setColorToken('--cf-edge-case', scheme.tertiary)
+    setColorToken('--cf-edge-exception', scheme.error)
+    setColorToken('--cf-edge-merge', scheme.outline)
+    setColorToken('--cf-edge-unreachable', scheme.outlineVariant)
+
     root.dataset.themeMode = mode
     root.dataset.colorScheme = isDark ? 'dark' : 'light'
     root.style.colorScheme = isDark ? 'dark' : 'light'

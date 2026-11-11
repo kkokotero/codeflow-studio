@@ -3,17 +3,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
+ * Une el valor guardado con el valor por defecto.
+ *
+ * El almacenamiento local puede venir de una versión anterior de la app, sin
+ * los campos que se hayan añadido después. Fusionar evita que esos campos
+ * queden sin definir al leerlos.
+ */
+export function mergePersistentValue<T>(defaults: T, stored: unknown): T {
+  if (!isPlainObject(defaults) || !isPlainObject(stored)) return stored as T
+  return { ...defaults, ...stored } as T
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
  * Estado que sobrevive a la recarga. Se lee en un efecto para que el HTML del
  * servidor y el del cliente coincidan y no se produzca desajuste de hidratación.
  */
 export function usePersistentState<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(initial)
   const [hydrated, setHydrated] = useState(false)
+  const defaultsRef = useRef(initial)
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(key)
-      if (raw) setValue(JSON.parse(raw) as T)
+      if (raw) setValue(mergePersistentValue(defaultsRef.current, JSON.parse(raw)))
     } catch {
       // Un valor ilegible no debe impedir abrir la app.
     }
@@ -38,6 +55,8 @@ interface ResizeHandleProps {
   onResize: (delta: number) => void
   /** Teclado: flechas para ajustar, con la tecla Mayús para pasos grandes. */
   onNudge?: (delta: number) => void
+  /** Se llama al terminar un arrastre o un ajuste con teclado. */
+  onCommit?: () => void
   label: string
 }
 
@@ -47,7 +66,7 @@ interface ResizeHandleProps {
  * La línea es un punto de agarre real: se arrastra con el puntero y también
  * se ajusta con el teclado, con el foco visible.
  */
-export function ResizeHandle({ orientation, onResize, onNudge, label }: ResizeHandleProps) {
+export function ResizeHandle({ orientation, onResize, onNudge, onCommit, label }: ResizeHandleProps) {
   const [dragging, setDragging] = useState(false)
   const originRef = useRef(0)
 
@@ -76,7 +95,8 @@ export function ResizeHandle({ orientation, onResize, onNudge, label }: ResizeHa
       // Nada que liberar.
     }
     setDragging(false)
-  }, [])
+    onCommit?.()
+  }, [onCommit])
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!onNudge) return
@@ -86,14 +106,17 @@ export function ResizeHandle({ orientation, onResize, onNudge, label }: ResizeHa
     if (event.key === forward) {
       event.preventDefault()
       onNudge(step)
+      onCommit?.()
     } else if (event.key === backward) {
       event.preventDefault()
       onNudge(-step)
+      onCommit?.()
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
       onNudge(0)
+      onCommit?.()
     }
-  }, [onNudge, orientation])
+  }, [onCommit, onNudge, orientation])
   return (
     <div
       className={`cf-resizer cf-resizer--${orientation} ${dragging ? 'is-dragging' : ''}`}
@@ -106,7 +129,7 @@ export function ResizeHandle({ orientation, onResize, onNudge, label }: ResizeHa
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
       onKeyDown={handleKeyDown}
-      onDoubleClick={() => onNudge?.(0)}
+      onDoubleClick={() => { onNudge?.(0); onCommit?.() }}
     >
       <span className="cf-resizer__grip" aria-hidden="true" />
     </div>

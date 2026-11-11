@@ -1,4 +1,5 @@
 import type { CodeFile, Language } from '@/lib/codeflow-types'
+import { isLanguage } from '@/lib/languages'
 
 /**
  * Capa de almacenamiento local (localStorage) para CodeFlow Studio.
@@ -477,6 +478,7 @@ function isCodeFile(value: unknown): value is CodeFile {
   return typeof file.id === 'string'
     && typeof file.name === 'string'
     && typeof file.code === 'string'
+    && isLanguage(file.language)
 }
 
 function isFolder(value: unknown): value is Folder {

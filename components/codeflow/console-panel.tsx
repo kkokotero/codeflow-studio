@@ -19,21 +19,40 @@ const STATUS_LABEL: Record<RunStatus, string> = {
 interface ConsolePanelProps {
   logs: ExecutionOutput[]
   status: RunStatus
-  notice: string
+  /** Resultado de la última ejecución, siempre visible en el cuerpo. */
+  runNotice: string
+  /** Aviso informativo del entorno, que se puede cerrar. */
+  hint: string
+  hintHidden: boolean
+  onDismissHint: () => void
   collapsed: boolean
   height?: number
   onToggleCollapsed: () => void
   onClear: () => void
+  /** Avisa de que la salida se copió, para registrar el progreso. */
+  onCopy?: () => void
 }
 
 /**
  * Consola de salida del proceso.
  *
- * Es el único panel de resultados:stdout y stderr con su marca de canal, el
+ * Es el único panel de resultados: stdout y stderr con su marca de canal, el
  * estado de la última ejecución y dos acciones que hacen algo real (copiar y
  * limpiar). Nada de controles que nunca reciben datos.
  */
-export function ConsolePanel({ logs, status, notice, collapsed, height, onToggleCollapsed, onClear }: ConsolePanelProps) {
+export function ConsolePanel({
+  logs,
+  status,
+  runNotice,
+  hint,
+  hintHidden,
+  onDismissHint,
+  collapsed,
+  height,
+  onToggleCollapsed,
+  onClear,
+  onCopy,
+}: ConsolePanelProps) {
   const [copied, setCopied] = useState(false)
 
   const copyOutput = useCallback(async () => {
@@ -42,11 +61,12 @@ export function ConsolePanel({ logs, status, notice, collapsed, height, onToggle
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
+      onCopy?.()
       window.setTimeout(() => setCopied(false), 1_600)
     } catch {
       setCopied(false)
     }
-  }, [logs])
+  }, [logs, onCopy])
 
   return (
     <section
@@ -67,13 +87,12 @@ export function ConsolePanel({ logs, status, notice, collapsed, height, onToggle
           <span className="cf-console__status">{STATUS_LABEL[status]}</span>
           <APP_ICONS.chevronDown aria-hidden="true" className={`cf-console__chevron ${collapsed ? 'is-collapsed' : ''}`} />
         </button>
-        <span className="cf-console__notice" title={notice}>{notice}</span>
         <div className="cf-console__actions">
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label="Copiar salida de la consola"
-            title="Copiar salida"
+            title={copied ? 'Copiado' : 'Copiar salida'}
             onClick={() => void copyOutput()}
             disabled={!logs.length}
           >
@@ -92,8 +111,19 @@ export function ConsolePanel({ logs, status, notice, collapsed, height, onToggle
         </div>
       </header>
       {!collapsed && (
-        <div className="cf-console__body" role="log" aria-live="polite" aria-label="Salida del programa">
-          {logs.length ? (
+        <>
+          {!hintHidden && (
+            <div className="cf-console__hint">
+              <APP_ICONS.info aria-hidden="true" />
+              <span>{hint}</span>
+              <button type="button" aria-label="Cerrar el aviso del entorno" title="Cerrar el aviso" onClick={onDismissHint}>
+                <APP_ICONS.close aria-hidden="true" />
+              </button>
+            </div>
+          )}
+          <div className="cf-console__body" role="log" aria-live="polite" aria-label="Salida del programa">
+            {runNotice ? <p className="cf-console__system">{runNotice}</p> : null}
+            {logs.length ? (
             logs.map((entry, index) => (
               <div className={`cf-console__line ${entry.stream === 'stderr' ? 'is-error' : ''}`} key={`${index}-${entry.stream}`}>
                 <span className="cf-console__prompt" aria-hidden="true">{entry.stream === 'stderr' ? '!' : '›'}</span>
@@ -109,7 +139,8 @@ export function ConsolePanel({ logs, status, notice, collapsed, height, onToggle
                   : 'Ejecuta el archivo para ver aquí stdout y stderr. Cada proceso corre en una microVM desechable, sin red.'}
             </p>
           )}
-        </div>
+          </div>
+        </>
       )}
     </section>
   )

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/menu'
 import { ACHIEVEMENTS, getLevelProgress, type AchievementProfile } from '@/lib/achievements'
 import type { Project } from '@/lib/storage'
+import { PageHeader } from '@/components/codeflow/page-header'
 
 interface HomeViewProps {
   projects: Project[]
@@ -23,6 +24,7 @@ interface HomeViewProps {
   onOpenProject: (projectId: string) => void
   onCreateProject: () => void
   onImportProject: () => void
+  onImportFolder: () => void
   onRenameProject: (project: Project) => void
   onDeleteProject: (project: Project) => void
   onExportProject: (project: Project) => void
@@ -41,7 +43,8 @@ function relativeDate(timestamp: number): string {
  * Vista principal: los proyectos de la sesión y el estado de la progresión.
  *
  * Es el punto de entrada al estudio: elegir un proyecto para abrirlo, crear
- * otro nuevo o consultar los logros, sin menús dispersos.
+ * otro nuevo o consultar los logros. También es válida sin ningún proyecto:
+ * la lista vacía ofrece las mismas acciones en lugar de un error.
  */
 export function HomeView({
   projects,
@@ -50,6 +53,7 @@ export function HomeView({
   onOpenProject,
   onCreateProject,
   onImportProject,
+  onImportFolder,
   onRenameProject,
   onDeleteProject,
   onExportProject,
@@ -64,33 +68,47 @@ export function HomeView({
   const badges = profile
     ? ACHIEVEMENTS.filter((achievement) => profile.unlocked[achievement.id]).slice(0, 6)
     : []
+  const totalFiles = projects.reduce((count, project) => count + project.files.length, 0)
+  const totalFolders = projects.reduce((count, project) => count + project.folders.filter((folder) => folder.parentId !== null).length, 0)
 
   return (
     <div className="cf-home">
       <div className="cf-home__scroll">
         <section className="cf-home__projects" aria-label="Proyectos">
-          <header className="cf-home__heading">
-            <div>
-              <span className="cf-home__eyebrow"><APP_ICONS.home aria-hidden="true" /> Espacio de trabajo</span>
-              <h1>Proyectos</h1>
-              <p>{projects.length === 0 ? 'Todavía no hay proyectos en esta sesión.' : `${projects.length} proyecto${projects.length === 1 ? '' : 's'} en esta sesión.`}</p>
-            </div>
-            <div className="cf-home__actions">
-              <Button variant="outline" size="sm" onClick={onImportProject}>
-                <APP_ICONS.import aria-hidden="true" /> Importar
-              </Button>
-              <Button variant="default" size="sm" onClick={onCreateProject}>
-                <APP_ICONS.newFolder aria-hidden="true" /> Nuevo proyecto
-              </Button>
-            </div>
-          </header>
+          <PageHeader
+            eyebrow={<><APP_ICONS.home aria-hidden="true" /> Espacio de trabajo</>}
+            title="Proyectos"
+            description={projects.length === 0
+              ? 'Todavía no hay proyectos. Crea uno o importa el código desde el disco.'
+              : `${projects.length} proyecto${projects.length === 1 ? '' : 's'} · ${totalFiles} archivo${totalFiles === 1 ? '' : 's'}${totalFolders > 0 ? ` · ${totalFolders} carpeta${totalFolders === 1 ? '' : 's'}` : ''}`}
+            actions={(
+              <>
+                <Button variant="outline" size="sm" onClick={onImportProject}>
+                  <APP_ICONS.import aria-hidden="true" /> Importar proyecto
+                </Button>
+                <Button variant="default" size="sm" onClick={onCreateProject}>
+                  <APP_ICONS.newFolder aria-hidden="true" /> Nuevo proyecto
+                </Button>
+              </>
+            )}
+          />
 
           {sorted.length === 0 ? (
             <div className="cf-empty cf-empty--home">
-              <APP_ICONS.home aria-hidden="true" />
+              <span className="cf-empty__glyph"><APP_ICONS.home aria-hidden="true" /></span>
               <strong>Sin proyectos todavía</strong>
-              <span>Crea un proyecto para empezar a escribir código, o importa un archivo <code>.codeflow.json</code>.</span>
-              <Button variant="default" size="sm" onClick={onCreateProject}>Crear el primero</Button>
+              <span>
+                Puedes empezar de cero con un proyecto vacío, importar un paquete
+                <code>.codeflow.json</code> o traerme una carpeta entera del disco.
+              </span>
+              <div className="cf-empty__actions">
+                <Button variant="default" size="sm" onClick={onCreateProject}>
+                  <APP_ICONS.newFolder aria-hidden="true" /> Crear un proyecto
+                </Button>
+                <Button variant="outline" size="sm" onClick={onImportFolder}>
+                  <APP_ICONS.newFolder aria-hidden="true" /> Importar una carpeta
+                </Button>
+              </div>
             </div>
           ) : (
             <ul className="cf-project-list">
@@ -104,14 +122,20 @@ export function HomeView({
                       <div className="cf-project-card__body">
                         <h2>{project.name}</h2>
                         <p>
-                          {project.files.length} archivo{project.files.length === 1 ? '' : 's'}
-                          {folderCount > 0 ? ` · ${folderCount} carpeta${folderCount === 1 ? '' : 's'}` : ''}
-                          <span aria-hidden="true"> · </span>
-                          {relativeDate(project.updatedAt)}
+                          <span className="cf-project-card__meta">
+                            {project.files.length} archivo{project.files.length === 1 ? '' : 's'}
+                          </span>
+                          {folderCount > 0 && (
+                            <span className="cf-project-card__meta">
+                              {folderCount} carpeta{folderCount === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          <span className="cf-project-card__meta cf-project-card__meta--time">{relativeDate(project.updatedAt)}</span>
                         </p>
                       </div>
                       <div className="cf-project-card__actions">
-                        <Button variant={isActive ? 'secondary' : 'default'} size="sm" onClick={() => onOpenProject(project.id)}>
+                        {isActive && <span className="cf-chip cf-chip--active">Abierto</span>}
+                        <Button variant="outline" size="sm" onClick={() => onOpenProject(project.id)}>
                           {isActive ? 'Continuar' : 'Abrir'}
                         </Button>
                         <Menu>
@@ -128,11 +152,11 @@ export function HomeView({
                               <MenuGroupLabel>Proyecto</MenuGroupLabel>
                               <MenuItem icon={APP_ICONS.open} onClick={() => onOpenProject(project.id)}>Abrir en el estudio</MenuItem>
                               <MenuItem icon={APP_ICONS.rename} onClick={() => onRenameProject(project)}>Renombrar…</MenuItem>
-                              <MenuItem icon={APP_ICONS.exportProject} onClick={() => onExportProject(project)}>Exportar proyecto</MenuItem>
+                              <MenuItem icon={APP_ICONS.exportProject} onClick={() => onExportProject(project)}>Exportar proyecto…</MenuItem>
                             </MenuGroup>
                             <MenuSeparator />
                             <MenuGroup>
-                              <MenuItem icon={APP_ICONS.delete} destructive onClick={() => onDeleteProject(project)} disabled={projects.length <= 1}>
+                              <MenuItem icon={APP_ICONS.delete} destructive onClick={() => onDeleteProject(project)}>
                                 Eliminar proyecto
                               </MenuItem>
                             </MenuGroup>
@@ -183,6 +207,18 @@ export function HomeView({
             <Button variant="ghost" size="sm" onClick={onOpenAchievements} className="cf-home__link">
               Ver los {unlockedCount} logros
               <APP_ICONS.chevronRight aria-hidden="true" />
+            </Button>
+          </section>
+
+          <section className="cf-home__panel cf-home__panel--muted">
+            <span className="cf-home__eyebrow">Siguiente paso</span>
+            <p className="cf-home__hint">
+              {projects.length === 0
+                ? 'Crea un proyecto y abre un archivo de ejemplo para ver el diagrama en acción.'
+                : 'Abre un proyecto, ejecuta un archivo y revisa el diagrama que genera.'}
+            </p>
+            <Button variant="ghost" size="sm" onClick={() => onImportFolder()} className="cf-home__link">
+              <APP_ICONS.newFolder aria-hidden="true" /> Importar una carpeta
             </Button>
           </section>
         </aside>

@@ -9,6 +9,7 @@ import { APP_ICONS, NODE_ICONS } from '@/components/codeflow/app-icons'
 import { AchievementsView } from '@/components/codeflow/achievements-view'
 import { AppearanceMenu, useMaterialTheme } from '@/components/codeflow/appearance-menu'
 import { ConsolePanel } from '@/components/codeflow/console-panel'
+import { DiagramExportDialog, ProjectExportDialog } from '@/components/codeflow/export-dialogs'
 import { FileTree, type FileTreeActions } from '@/components/codeflow/file-tree'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
@@ -101,6 +102,8 @@ interface LayoutState {
   consoleCollapsed: boolean
   inspectorTab: InspectorTab
   view: View
+  /** Avisos cerrados por el usuario en cada vista. */
+  hiddenNotices: string[]
 }
 
 const DEFAULT_LAYOUT: LayoutState = {
@@ -112,6 +115,7 @@ const DEFAULT_LAYOUT: LayoutState = {
   consoleCollapsed: false,
   inspectorTab: 'symbols',
   view: 'home',
+  hiddenNotices: [],
 }
 
 type DialogState =
@@ -126,6 +130,8 @@ type DialogState =
   | { kind: 'delete-file'; file: CodeFile }
   | { kind: 'delete-folder'; folder: Folder }
   | { kind: 'delete-project'; project: Project }
+  | { kind: 'export-diagram' }
+  | { kind: 'export-project'; project: Project | null }
 
 function getExtension(name: string): Language {
   return languageFromFileName(name) ?? 'javascript'
@@ -228,7 +234,7 @@ export function CodeflowStudio() {
   const [mobilePane, setMobilePane] = useState<MobilePane>('editor')
   const [isImporting, setIsImporting] = useState(false)
   const [fileFilter, setFileFilter] = useState('')
-  const [notice, setNotice] = useState(EXECUTION_READY_NOTICE)
+  const [notice, setNotice] = useState('')
   const [showHelp, setShowHelp] = useState(false)
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' })
   const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
@@ -239,6 +245,7 @@ export function CodeflowStudio() {
   const executionAbortRef = useRef<AbortController | null>(null)
   const decorationIdsRef = useRef<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const projectInputRef = useRef<HTMLInputElement>(null)
   const fileSearchRef = useRef<HTMLInputElement>(null)
   const workspaceRef = useRef<HTMLDivElement>(null)
@@ -396,6 +403,20 @@ export function CodeflowStudio() {
     setLayout((current) => ({ ...current, ...patch }))
   }, [setLayout])
 
+  const hideNotice = useCallback((id: string) => {
+    setLayout((current) => current.hiddenNotices.includes(id)
+      ? current
+      : { ...current, hiddenNotices: [...current.hiddenNotices, id] })
+  }, [setLayout])
+
+  const showNotice = useCallback((id: string) => {
+    setLayout((current) => ({ ...current, hiddenNotices: current.hiddenNotices.filter((item) => item !== id) }))
+  }, [setLayout])
+
+  const hiddenNotices = Array.isArray(layout.hiddenNotices) ? layout.hiddenNotices : []
+  const runtimeNoticeHidden = hiddenNotices.includes('runtime')
+  const analysisNoticeHidden = hiddenNotices.includes('analysis')
+
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
     mutateProject((state) => {
@@ -430,6 +451,11 @@ export function CodeflowStudio() {
     editorRef.current?.setPosition({ lineNumber: node.data.line, column: 1 })
     editorRef.current?.focus()
   }, [displayCode, graph.nodes])
+
+  const openSymbol = useCallback((nodeId: string) => {
+    recordProgress({ type: 'symbol', action: 'navigated' })
+    openLine(nodeId)
+  }, [openLine, recordProgress])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -564,7 +590,7 @@ export function CodeflowStudio() {
     setManualEdges([])
     setStatus('idle')
     setLogs([])
-    setNotice(EXECUTION_READY_NOTICE)
+    setNotice('')
     mutateProject((state) => {
       const project = getActiveProject(state)
       if (!project) return state
@@ -586,9 +612,15 @@ export function CodeflowStudio() {
     setLogs([])
     setSnapshots([])
     setSelectedSnapshots([])
-    setNotice(EXECUTION_READY_NOTICE)
+    setNotice('')
     updateLayout({ view: 'studio' })
   }, [updateLayout])
+
+  /** Quedarse sin proyectos también es una forma válida de trabajar. */
+  useEffect(() => {
+    if (view !== 'home' || !storageLoaded || projects.length > 0) return
+    recordProgress({ type: 'project', action: 'empty' })
+  }, [projects.length, recordProgress, storageLoaded, view])
 
   /** El proyecto recién creado se abre en cuanto la lista se vuelve a pintar. */
   useEffect(() => {
@@ -639,7 +671,8 @@ export function CodeflowStudio() {
     })
     setDialog({ kind: 'none' })
     setNotice(`Carpeta ${name} creada.`)
-  }, [mutateProject])
+    recordProgress({ type: 'organize', action: 'folder-created' })
+  }, [mutateProject, recordProgress])
 
   const renameFile = useCallback((fileId: string, name: string) => {
     mutateProject((state) => {
@@ -649,7 +682,8 @@ export function CodeflowStudio() {
     })
     setDialog({ kind: 'none' })
     setNotice(`Archivo renombrado a ${name}.`)
-  }, [mutateProject])
+    recordProgress({ type: 'organize', action: 'file-renamed' })
+  }, [mutateProject, recordProgress])
 
   const renameFolder = useCallback((folderId: string, name: string) => {
     mutateProject((state) => {
@@ -659,7 +693,8 @@ export function CodeflowStudio() {
     })
     setDialog({ kind: 'none' })
     setNotice(`Carpeta renombrada a ${name}.`)
-  }, [mutateProject])
+    recordProgress({ type: 'organize', action: 'file-renamed' })
+  }, [mutateProject, recordProgress])
 
   const duplicateFile = useCallback((file: CodeFile) => {
     const copyName = file.name.replace(/(\.[^./]+)$/, '-copia$1')
@@ -669,7 +704,8 @@ export function CodeflowStudio() {
       return createFile(state, project.id, file.folderId ?? project.activeFolderId, copyName, file.language, file.code)
     })
     setNotice(`${copyName} duplicado.`)
-  }, [mutateProject])
+    recordProgress({ type: 'organize', action: 'file-duplicated' })
+  }, [mutateProject, recordProgress])
 
   const moveFileTo = useCallback((fileId: string, folderId: string | null) => {
     mutateProject((state) => {
@@ -679,7 +715,8 @@ export function CodeflowStudio() {
     })
     setDialog({ kind: 'none' })
     setNotice('Archivo movido.')
-  }, [mutateProject])
+    recordProgress({ type: 'organize', action: 'file-moved' })
+  }, [mutateProject, recordProgress])
 
   const removeFile = useCallback((fileId: string) => {
     if (files.length <= 1) {
@@ -719,7 +756,8 @@ export function CodeflowStudio() {
     pendingProjectRef.current = project.id
     setDialog({ kind: 'none' })
     setNotice(`Proyecto ${project.name} creado.`)
-  }, [])
+    recordProgress({ type: 'project', action: 'created' })
+  }, [recordProgress])
 
   const renameProject = useCallback((projectId: string, name: string) => {
     setProjects((current) => {
@@ -741,7 +779,8 @@ export function CodeflowStudio() {
     setDialog({ kind: 'none' })
     setNotice('Proyecto eliminado.')
     updateLayout({ view: 'home' })
-  }, [updateLayout])
+    recordProgress({ type: 'project', action: 'deleted' })
+  }, [recordProgress, updateLayout])
 
   const importFiles = useCallback(async (items: FileList | null) => {
     if (!items?.length) return
@@ -831,6 +870,54 @@ export function CodeflowStudio() {
     }
   }, [updateLayout])
 
+  const importFolder = useCallback(async (items: FileList | null) => {
+    const selected = Array.from(items ?? [])
+    if (!selected.length) return
+    try {
+      const readable = selected.filter((item) => languageFromFileName(item.name))
+      if (!readable.length) throw new Error('La carpeta no contiene archivos de código compatibles.')
+      if (readable.length > 200) throw new Error('El límite es de 200 archivos por carpeta.')
+      const folderName = (readable[0] as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0] || 'Proyecto importado'
+      const project = createProject(folderName)
+      let next: StorageState = { ...createEmptyState(), projects: [project], activeProjectId: project.id }
+      const rootFolder = project.folders[0]
+      const folders = new Map<string, string>([[rootFolder.id, rootFolder.id]])
+      const ensureFolder = (path: string): string => {
+        if (!path) return rootFolder.id
+        const existing = folders.get(path)
+        if (existing) return existing
+        const parentPath = path.split('/').slice(0, -1).join('/')
+        const parentId = ensureFolder(parentPath)
+        const name = path.split('/').at(-1) ?? path
+        const before = next.projects.flatMap((item) => item.folders).length
+        next = createFolder(next, project.id, name, parentId)
+        const created = next.projects.flatMap((item) => item.folders)
+        const id = created[before]?.id ?? rootFolder.id
+        folders.set(path, id)
+        return id
+      }
+      for (const item of readable) {
+        const relative = (item as File & { webkitRelativePath?: string }).webkitRelativePath ?? item.name
+        const segments = relative.split('/')
+        const folderPath = segments.slice(1, -1).join('/')
+        const folderId = ensureFolder(folderPath)
+        const text = await item.text()
+        next = createFile(next, project.id, folderId, segments.slice(1).join('/') || item.name, getExtension(item.name), text)
+      }
+      setProjects(next.projects)
+      setActiveProjectId(project.id)
+      activeProjectIdRef.current = project.id
+      pendingProjectRef.current = project.id
+      setNotice(`Carpeta ${folderName} importada: ${readable.length} archivos.`)
+      recordProgress({ type: 'explore', feature: 'import' })
+      recordProgress({ type: 'organize', action: 'folder-imported' })
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'No se pudo importar la carpeta.')
+    } finally {
+      if (folderInputRef.current) folderInputRef.current.value = ''
+    }
+  }, [recordProgress])
+
   const downloadFile = useCallback((contents: string, filename: string, mime: string) => {
     const blob = new Blob([contents], { type: mime })
     const url = URL.createObjectURL(blob)
@@ -846,38 +933,6 @@ export function CodeflowStudio() {
     setNotice(`Se exportó ${baseName(displayFileName)}.`)
     recordProgress({ type: 'export', target: 'file' })
   }, [displayCode, displayFileName, downloadFile, recordProgress])
-
-  const exportProject = useCallback((project?: Project) => {
-    const target = project ?? activeProject
-    if (!target) return
-    const bundle = {
-      format: 'codeflow-project',
-      version: 1,
-      name: target.name,
-      files: target.files.map(({ name, language, code }) => ({ name, language, code })),
-    }
-    downloadFile(JSON.stringify(bundle, null, 2), `${slugify(target.name)}.codeflow.json`, 'application/json;charset=utf-8')
-    setNotice(`${target.files.length} archivo${target.files.length === 1 ? '' : 's'} exportado${target.files.length === 1 ? '' : 's'} como proyecto CodeFlow.`)
-    recordProgress({ type: 'export', target: 'project' })
-  }, [activeProject, downloadFile, recordProgress])
-
-  const exportDiagram = useCallback(() => {
-    const diagram = {
-      format: 'codeflow-diagram',
-      version: 1,
-      file: displayFileName,
-      language: displayLanguage,
-      nodes: graph.nodes.map(({ id, position, data }) => ({ id, position, ...data })),
-      edges: [...graph.edges, ...manualEdges],
-    }
-    downloadFile(
-      JSON.stringify(diagram, null, 2),
-      `${baseName(displayFileName).replace(/\.[^.]+$/, '') || 'diagrama'}.diagram.json`,
-      'application/json;charset=utf-8',
-    )
-    setNotice(`Diagrama de ${displayFileName} exportado como JSON.`)
-    recordProgress({ type: 'export', target: 'diagram' })
-  }, [displayFileName, displayLanguage, downloadFile, graph, manualEdges, recordProgress])
 
   const copyCode = useCallback(async () => {
     try {
@@ -915,9 +970,23 @@ export function CodeflowStudio() {
     recordProgress({ type: 'clear-console' })
   }, [recordProgress])
 
+  const copyConsole = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(logs.map((entry) => entry.text).join('\n'))
+      setNotice('Salida copiada al portapapeles.')
+      recordProgress({ type: 'console', action: 'copied' })
+    } catch {
+      setNotice('No se pudo copiar la salida.')
+    }
+  }, [logs, recordProgress])
+
   const toggleSnapshotSelection = useCallback((id: string) => {
-    setSelectedSnapshots((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id])
-  }, [])
+    setSelectedSnapshots((current) => {
+      const next = current.includes(id) ? current.filter((item) => item !== id) : current.length < 2 ? [...current, id] : [current[1], id]
+      if (next.length === 2) recordProgress({ type: 'console', action: 'compared' })
+      return next
+    })
+  }, [recordProgress])
 
   const selectSnapshot = useCallback((snapshot: RunSnapshot) => {
     setHistoricalView(snapshot)
@@ -980,7 +1049,7 @@ export function CodeflowStudio() {
             <button
               type="button"
               className="cf-brand"
-              onClick={() => updateLayout({ view: 'home' })}
+              onClick={() => { updateLayout({ view: 'home' }); recordProgress({ type: 'project', action: 'visited' }) }}
               aria-label="Ir a los proyectos"
               title="Proyectos"
             >
@@ -1005,7 +1074,7 @@ export function CodeflowStudio() {
                       <MenuGroupLabel>Proyecto</MenuGroupLabel>
                       <MenuItem icon={APP_ICONS.home} onClick={() => updateLayout({ view: 'home' })}>Ver los proyectos</MenuItem>
                       <MenuItem icon={APP_ICONS.rename} onClick={() => activeProject && setDialog({ kind: 'rename-project', project: activeProject })}>Renombrar proyecto…</MenuItem>
-                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => exportProject()}>Exportar proyecto</MenuItem>
+                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => activeProject && setDialog({ kind: 'export-project', project: activeProject })}>Exportar proyecto…</MenuItem>
                     </MenuGroup>
                   </MenuContent>
                 </Menu>
@@ -1016,10 +1085,38 @@ export function CodeflowStudio() {
           <div className="cf-toolbar__trailing">
             {isStudio && (
               <>
+                {(runtimeNoticeHidden || analysisNoticeHidden) && (
+                  <div className="cf-toolbar__restores">
+                    {runtimeNoticeHidden && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="cf-icon-button cf-restore-button"
+                        aria-label="Mostrar el aviso del entorno"
+                        title="Mostrar el aviso del entorno"
+                        onClick={() => showNotice('runtime')}
+                      >
+                        <APP_ICONS.info aria-hidden="true" />
+                      </Button>
+                    )}
+                    {analysisNoticeHidden && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="cf-icon-button cf-restore-button"
+                        aria-label="Mostrar el aviso de análisis estático"
+                        title="Mostrar el aviso de análisis estático"
+                        onClick={() => showNotice('analysis')}
+                      >
+                        <APP_ICONS.analysis aria-hidden="true" />
+                      </Button>
+                    )}
+                  </div>
+                )}
                 {isRuntimeBusy ? (
                   <Button size="default" className="cf-run-button cf-run-button--busy" onClick={cancelExecution} aria-label="Detener ejecución" title="Detener ejecución">
                     <APP_ICONS.stop aria-hidden="true" />
-                    Detener
+                    <span className="cf-run-button__label">Detener</span>
                   </Button>
                 ) : (
                   <Button
@@ -1031,7 +1128,7 @@ export function CodeflowStudio() {
                     title={EXECUTION_LIMIT_NOTICE}
                   >
                     <APP_ICONS.run aria-hidden="true" />
-                    Ejecutar
+                    <span className="cf-run-button__label">Ejecutar</span>
                     <kbd className="cf-run-button__kbd">⌘↵</kbd>
                   </Button>
                 )}
@@ -1087,8 +1184,8 @@ export function CodeflowStudio() {
                     <MenuGroup>
                       <MenuGroupLabel>Exportar</MenuGroupLabel>
                       <MenuItem icon={APP_ICONS.exportFile} onClick={exportActiveFile}>Exportar archivo</MenuItem>
-                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => exportProject()}>Exportar proyecto</MenuItem>
-                      <MenuItem icon={APP_ICONS.exportDiagram} onClick={exportDiagram}>Exportar diagrama</MenuItem>
+                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => activeProject && setDialog({ kind: 'export-project', project: activeProject })}>Exportar proyecto…</MenuItem>
+                      <MenuItem icon={APP_ICONS.exportDiagram} onClick={() => setDialog({ kind: 'export-diagram' })}>Exportar diagrama…</MenuItem>
                     </MenuGroup>
                     <MenuSeparator />
                     <MenuGroup>
@@ -1103,11 +1200,12 @@ export function CodeflowStudio() {
                       <MenuGroupLabel>Proyectos</MenuGroupLabel>
                       <MenuItem icon={APP_ICONS.newFile} onClick={() => setDialog({ kind: 'new-project' })}>Nuevo proyecto…</MenuItem>
                       <MenuItem icon={APP_ICONS.import} onClick={() => projectInputRef.current?.click()}>Importar proyecto…</MenuItem>
+                      <MenuItem icon={APP_ICONS.newFolder} onClick={() => folderInputRef.current?.click()}>Importar carpeta…</MenuItem>
                     </MenuGroup>
                     <MenuSeparator />
                     <MenuGroup>
                       <MenuGroupLabel>Sesión</MenuGroupLabel>
-                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => exportProject()} disabled={!activeProject}>Exportar el proyecto activo</MenuItem>
+                      <MenuItem icon={APP_ICONS.exportProject} onClick={() => activeProject && setDialog({ kind: 'export-project', project: activeProject })} disabled={!activeProject}>Exportar el proyecto activo…</MenuItem>
                       <MenuItem icon={APP_ICONS.help} shortcut="⌘?" onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}>Ayuda y atajos</MenuItem>
                     </MenuGroup>
                   </>
@@ -1184,7 +1282,7 @@ export function CodeflowStudio() {
                   ) : activeProject ? (
                     <FileTree
                       project={activeProject}
-                      expanded={layout.expanded}
+                      expanded={Array.isArray(layout.expanded) ? layout.expanded : []}
                       activeFileId={activeFileId}
                       disabled={isRuntimeBusy}
                       actions={treeActions}
@@ -1210,6 +1308,7 @@ export function CodeflowStudio() {
                 label="Ajustar el ancho del explorador"
                 onResize={(delta) => updateLayout({ files: clamp(layout.files + delta, 160, 460) })}
                 onNudge={(delta) => updateLayout({ files: delta === 0 ? DEFAULT_LAYOUT.files : clamp(layout.files + delta, 160, 460) })}
+                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
               />
 
               <section className={`cf-panel cf-editor ${mobilePane === 'editor' ? 'is-mobile-active' : ''}`} aria-label="Editor de código">
@@ -1300,6 +1399,7 @@ export function CodeflowStudio() {
                 label="Ajustar el ancho del editor"
                 onResize={(delta) => updateLayout({ editor: clamp(layout.editor + delta, 260, 1400) })}
                 onNudge={(delta) => updateLayout({ editor: delta === 0 ? DEFAULT_LAYOUT.editor : clamp(layout.editor + delta, 260, 1400) })}
+                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
               />
 
               <section className={`cf-panel cf-diagram ${mobilePane === 'diagram' ? 'is-mobile-active' : ''}`} aria-label="Diagrama del código">
@@ -1310,7 +1410,14 @@ export function CodeflowStudio() {
                     <span className="cf-count">{graph.nodes.length} nodos</span>
                   </div>
                   <div className="cf-pane-header__actions">
-                    <span className="cf-static-badge">Análisis estático</span>
+                    {!analysisNoticeHidden && (
+                      <span className="cf-static-badge">
+                        Análisis estático
+                        <button type="button" aria-label="Cerrar el aviso de análisis estático" title="Cerrar el aviso" onClick={() => hideNotice('analysis')}>
+                          <APP_ICONS.close aria-hidden="true" />
+                        </button>
+                      </span>
+                    )}
                     <Menu>
                       <MenuTrigger
                         render={<Button variant="ghost" size="icon-xs" />}
@@ -1321,7 +1428,7 @@ export function CodeflowStudio() {
                         <APP_ICONS.more aria-hidden="true" />
                       </MenuTrigger>
                       <MenuContent align="end">
-                        <MenuItem icon={APP_ICONS.exportDiagram} onClick={exportDiagram}>Exportar diagrama</MenuItem>
+                        <MenuItem icon={APP_ICONS.exportDiagram} onClick={() => setDialog({ kind: 'export-diagram' })}>Exportar diagrama…</MenuItem>
                         <MenuItem icon={APP_ICONS.delete} onClick={() => { setManualEdges([]); setNotice('Conexiones visuales eliminadas.') }} disabled={!manualEdges.length}>
                           Quitar conexiones visuales
                         </MenuItem>
@@ -1354,6 +1461,7 @@ export function CodeflowStudio() {
                 label="Ajustar el ancho del inspector"
                 onResize={(delta) => updateLayout({ inspector: clamp(layout.inspector - delta, 200, 520) })}
                 onNudge={(delta) => updateLayout({ inspector: delta === 0 ? DEFAULT_LAYOUT.inspector : clamp(layout.inspector - delta, 200, 520) })}
+                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
               />
 
               <aside className={`cf-panel cf-inspector ${mobilePane === 'inspector' ? 'is-mobile-active' : ''}`} aria-label="Inspector">
@@ -1414,7 +1522,7 @@ export function CodeflowStudio() {
                     </div>
                     <div className="cf-panel__body" role="tabpanel" id="cf-panel-inspector" aria-labelledby={inspectorTab === 'symbols' ? 'cf-tab-symbols' : 'cf-tab-history'}>
                       {inspectorTab === 'symbols' ? (
-                        <SymbolList graph={graph} onSelect={openLine} />
+                        <SymbolList graph={graph} onSelect={openSymbol} />
                       ) : (
                         <HistoryList
                           snapshots={snapshots}
@@ -1435,15 +1543,20 @@ export function CodeflowStudio() {
               label="Ajustar el alto de la consola"
               onResize={(delta) => updateLayout({ console: clamp(layout.console - delta, 80, 520) })}
               onNudge={(delta) => updateLayout({ console: delta === 0 ? DEFAULT_LAYOUT.console : clamp(layout.console - delta, 80, 520) })}
+              onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
             />
 
             <ConsolePanel
               logs={logs}
               status={status}
-              notice={notice}
+              runNotice={notice}
+              hint={EXECUTION_READY_NOTICE}
+              hintHidden={runtimeNoticeHidden}
+              onDismissHint={() => hideNotice('runtime')}
               collapsed={consoleCollapsed}
               onToggleCollapsed={() => updateLayout({ consoleCollapsed: !consoleCollapsed })}
               onClear={clearConsole}
+              onCopy={() => void copyConsole()}
               height={consoleCollapsed ? undefined : layout.console}
             />
 
@@ -1490,10 +1603,11 @@ export function CodeflowStudio() {
             onOpenProject={openProject}
             onCreateProject={() => setDialog({ kind: 'new-project' })}
             onImportProject={() => projectInputRef.current?.click()}
+            onImportFolder={() => folderInputRef.current?.click()}
             onRenameProject={(project) => setDialog({ kind: 'rename-project', project })}
             onDeleteProject={(project) => setDialog({ kind: 'delete-project', project })}
-            onExportProject={(project) => exportProject(project)}
-            onOpenAchievements={() => updateLayout({ view: 'achievements' })}
+            onExportProject={(project) => setDialog({ kind: 'export-project', project })}
+            onOpenAchievements={() => { updateLayout({ view: 'achievements' }); recordProgress({ type: 'project', action: 'visited' }) }}
           />
         ) : (
           <AchievementsView
@@ -1511,6 +1625,15 @@ export function CodeflowStudio() {
           onChange={(event) => void importProject(event.target.files)}
           aria-label="Seleccionar un proyecto CodeFlow para importar"
         />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          className="visually-hidden"
+          {...{ webkitdirectory: '', directory: '' }}
+          onChange={(event) => void importFolder(event.target.files)}
+          aria-label="Seleccionar una carpeta con el código del proyecto"
+        />
       </div>
 
       {achievementToasts[0] && (
@@ -1526,7 +1649,7 @@ export function CodeflowStudio() {
         </div>
       )}
 
-      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
+      <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />
 
       <NewFileDialog
         open={dialog.kind === 'new-file'}
@@ -1617,6 +1740,31 @@ export function CodeflowStudio() {
         confirmLabel="Eliminar proyecto"
         onClose={() => setDialog({ kind: 'none' })}
         onConfirm={() => { if (dialog.kind === 'delete-project') removeProjectById(dialog.project.id) }}
+      />
+
+      <DiagramExportDialog
+        open={dialog.kind === 'export-diagram'}
+        graph={graph}
+        manualEdges={manualEdges}
+        fileName={displayFileName}
+        onClose={() => setDialog({ kind: 'none' })}
+        onExported={(format) => {
+          setNotice(`Diagrama exportado como ${format.toUpperCase()}.`)
+          recordProgress({ type: 'export', target: 'diagram' })
+          if (format !== 'json') recordProgress({ type: 'export-diagram-image', format })
+        }}
+      />
+
+      <ProjectExportDialog
+        open={dialog.kind === 'export-project'}
+        project={dialog.kind === 'export-project' ? dialog.project : (activeProject ?? null)}
+        onClose={() => setDialog({ kind: 'none' })}
+        onExported={(format) => {
+          const project = dialog.kind === 'export-project' ? dialog.project : activeProject
+          setNotice(`${project?.name ?? 'Proyecto'} exportado como ${format === 'zip' ? 'ZIP' : '.codeflow.json'}.`)
+          recordProgress({ type: 'export', target: 'project' })
+          recordProgress({ type: 'export-project-archive', format })
+        }}
       />
     </>
   )
