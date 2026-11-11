@@ -13,7 +13,9 @@ import { DiagramExportDialog, ProjectExportDialog } from '@/components/codeflow/
 import { FileTree, type FileTreeActions } from '@/components/codeflow/file-tree'
 import { FlowCanvas } from '@/components/codeflow/flow-canvas'
 import { readAppPalette, withAlpha, withoutHash } from '@/lib/app-palette'
-import { prepareLocalCode, runLocally, type LocalRuntimeHandle } from '@/lib/local-runtime'
+import { getBrowserRuntime, missingRuntimeMessage } from '@/lib/runtimes'
+import { prepareLocalCode } from '@/lib/runtimes/javascript'
+import type { RuntimeSession } from '@/lib/runtimes/types'
 import { FlowNodeEditor } from '@/components/codeflow/flow-node-editor'
 import { HelpDialog } from '@/components/codeflow/help-dialog'
 import { HomeView } from '@/components/codeflow/home-view'
@@ -58,7 +60,7 @@ import {
   isLanguage,
   languageFromFileName,
 } from '@/lib/languages'
-import { EXECUTION_LIMIT_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
+import { EXECUTION_LIMIT_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES } from '@/lib/runtime-safety'
 import {
   createEmptyState,
   createFile,
@@ -263,7 +265,7 @@ export function CodeflowStudio() {
   const monacoRef = useRef<MonacoInstance | null>(null)
   const executionAbortRef = useRef<AbortController | null>(null)
   /** Ejecución local en el navegador, con entrada estándar abierta. */
-  const localRuntimeRef = useRef<LocalRuntimeHandle | null>(null)
+  const localRuntimeRef = useRef<RuntimeSession | null>(null)
   const decorationIdsRef = useRef<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -518,7 +520,7 @@ export function CodeflowStudio() {
     outputTruncated: boolean
   }) => {
     const output = result.output.length ? result.output : result.timedOut
-      ? [{ stream: 'stderr' as const, text: `Tiempo límite de ${MAX_EXECUTION_TIME_MS / 1_000} s alcanzado.` }]
+      ? [{ stream: 'stderr' as const, text: 'Tiempo límite alcanzado: el proceso se detuvo.' }]
       : result.outputTruncated
         ? [{ stream: 'stderr' as const, text: 'La salida superó el límite y el proceso fue detenido.' }]
         : result.exitCode !== 0
@@ -551,34 +553,46 @@ export function CodeflowStudio() {
         code: file.code,
       })
     }
-    if (result.timedOut) setNotice(`Tiempo límite alcanzado · ${MAX_EXECUTION_TIME_MS / 1_000} s · proceso detenido.`)
+    if (result.timedOut) setNotice('Tiempo límite alcanzado · proceso detenido.')
     else if (result.outputTruncated) setNotice(`Salida limitada a ${Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB · proceso detenido.`)
     else if (result.exitCode !== 0) setNotice(`El proceso terminó con código ${result.exitCode} · revisa stderr.`)
     else setNotice(`Ejecución completada en ${(result.durationMs / 1_000).toFixed(2)} s.`)
   }, [recordProgress])
 
   /**
-   * Ejecución en el navegador: el programa corre en un worker y la consola
-   * muestra su salida en vivo. Nada sale del equipo.
+   * Ejecución en el navegador.
+   *
+   * Cada lenguaje tiene su runtime: el programa corre dentro de un Web Worker
+   * y la consola muestra su salida en vivo. Nada sale del equipo.
    */
   const runInBrowser = useCallback((file: CodeFile) => {
+    const runtime = getBrowserRuntime(file.language)
+    if (!runtime) {
+      const message = missingRuntimeMessage(file.language)
+      setStatus('error')
+      setLogs([])
+      setNotice(message)
+      return
+    }
+
     let prepared: string
     try {
       prepared = prepareLocalCode(file.language, file.code)
-    } catch {
-      setNotice('El archivo no se puede preparar para el navegador; se usa el entorno aislado.')
-      void runRemote(file)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo preparar el programa.'
+      setStatus('error')
+      setLogs([{ stream: 'stderr', text: `${message}\n` }])
+      setNotice(message)
       return
     }
 
     setStatus('running')
     setLogs([])
     setInputPrompt(null)
-    setNotice('Ejecutando en el navegador…')
+    setNotice(`Ejecutando en el navegador · ${runtime.place}…`)
 
-    const handle = runLocally({
+    const handle = runtime.run({
       code: prepared,
-      language: file.language,
       onOutput: (chunk) => {
         setLogs((current) => {
           const last = current.at(-1)
@@ -588,6 +602,7 @@ export function CodeflowStudio() {
           return [...current, { stream: chunk.stream, text: chunk.text }]
         })
       },
+      onReset: () => setLogs([]),
       onInputRequest: (prompt) => setInputPrompt(prompt),
       onExit: (result) => {
         localRuntimeRef.current = null
@@ -596,52 +611,6 @@ export function CodeflowStudio() {
       },
     })
     localRuntimeRef.current = handle
-  }, [finishExecution])
-
-  /** Ejecución aislada en el servidor, para los lenguajes que no son JavaScript. */
-  const runRemote = useCallback(async (file: CodeFile) => {
-    const controller = new AbortController()
-    executionAbortRef.current = controller
-    setStatus('loading')
-    setLogs([])
-    setNotice('Creando una microVM desechable…')
-
-    try {
-      const response = await fetch('/api/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: file.language, code: file.code }),
-        signal: controller.signal,
-      })
-      const payload: unknown = await response.json().catch(() => null)
-      if (!response.ok) {
-        const errorMessage = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : 'No se pudo ejecutar el programa.'
-        throw new Error(errorMessage)
-      }
-      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Respuesta de ejecución no válida.')
-
-      const result = payload as {
-        output: ExecutionOutput[]
-        exitCode: number
-        durationMs: number
-        timedOut: boolean
-        outputTruncated: boolean
-      }
-      if (!Array.isArray(result.output) || typeof result.exitCode !== 'number') throw new Error('Respuesta de ejecución no válida.')
-      finishExecution(file, result)
-    } catch (error) {
-      const cancelled = controller.signal.aborted
-      const message = cancelled
-        ? 'Ejecución detenida · cerrando el entorno aislado.'
-        : error instanceof Error ? error.message : 'No se pudo ejecutar el programa.'
-      setStatus(cancelled ? 'stopped' : 'error')
-      if (!cancelled) setLogs([{ stream: 'stderr', text: message }])
-      setNotice(message)
-    } finally {
-      if (executionAbortRef.current === controller) executionAbortRef.current = null
-    }
   }, [finishExecution])
 
   const runCode = useCallback(async () => {
@@ -656,15 +625,8 @@ export function CodeflowStudio() {
       return
     }
 
-    // JavaScript y TypeScript se ejecutan en el navegador: la consola es
-    // interactiva y nada sale del equipo.
-    if (activeFile.language === 'javascript' || activeFile.language === 'typescript') {
-      runInBrowser(activeFile)
-      return
-    }
-
-    await runRemote(activeFile)
-  }, [activeFile, historicalView, runInBrowser, runRemote])
+    runInBrowser(activeFile)
+  }, [activeFile, historicalView, runInBrowser])
 
   /** Escribe una línea en la entrada estándar del programa en marcha. */
   const sendConsoleInput = useCallback((line: string) => {

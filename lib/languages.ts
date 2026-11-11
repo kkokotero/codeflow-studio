@@ -12,20 +12,6 @@ export type Language =
 
 export type DiagramAnalyzer = 'javascript' | 'python' | 'generic' | 'lua'
 
-export interface RuntimeCommand {
-  cmd: string
-  args: string[]
-  phase: 'compile' | 'run'
-}
-
-export interface RuntimePlan {
-  filename: string
-  check: string
-  installPackages: string[]
-  compile?: RuntimeCommand
-  run: RuntimeCommand
-}
-
 export interface LanguageDefinition {
   id: Language
   label: string
@@ -48,7 +34,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['js', 'jsx', 'mjs', 'cjs'],
     monacoLanguage: 'javascript',
     tabSize: 2,
-    runtimeName: 'Node 24 · aislado',
+    runtimeName: 'Web Worker · navegador',
     analyzerName: 'JavaScript · Babel AST',
     diagram: 'javascript',
   },
@@ -60,7 +46,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['ts', 'tsx', 'mts', 'cts'],
     monacoLanguage: 'typescript',
     tabSize: 2,
-    runtimeName: 'Bun · aislado',
+    runtimeName: 'Web Worker · navegador',
     analyzerName: 'TypeScript · Babel AST',
     diagram: 'javascript',
   },
@@ -72,7 +58,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['py', 'pyw'],
     monacoLanguage: 'python',
     tabSize: 4,
-    runtimeName: 'Python 3.14 · aislado',
+    runtimeName: 'Pyodide · WebAssembly',
     analyzerName: 'Python · Lezer',
     diagram: 'python',
   },
@@ -84,7 +70,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['lua'],
     monacoLanguage: 'lua',
     tabSize: 2,
-    runtimeName: 'Lua 5.4 · aislado',
+    runtimeName: 'Wasmoon · WebAssembly',
     analyzerName: 'Lua · analizador estructural',
     diagram: 'lua',
   },
@@ -96,7 +82,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['java'],
     monacoLanguage: 'java',
     tabSize: 4,
-    runtimeName: 'OpenJDK · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'Java · analizador estructural',
     diagram: 'generic',
   },
@@ -108,7 +94,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['c', 'h'],
     monacoLanguage: 'c',
     tabSize: 4,
-    runtimeName: 'GCC · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'C · analizador estructural',
     diagram: 'generic',
   },
@@ -120,7 +106,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'],
     monacoLanguage: 'cpp',
     tabSize: 4,
-    runtimeName: 'G++ · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'C++ · analizador estructural',
     diagram: 'generic',
   },
@@ -132,7 +118,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['cs'],
     monacoLanguage: 'csharp',
     tabSize: 4,
-    runtimeName: 'Mono · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'C# · analizador estructural',
     diagram: 'generic',
   },
@@ -144,7 +130,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['go'],
     monacoLanguage: 'go',
     tabSize: 4,
-    runtimeName: 'Go · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'Go · analizador estructural',
     diagram: 'generic',
   },
@@ -156,7 +142,7 @@ export const LANGUAGE_DEFINITIONS: Record<Language, LanguageDefinition> = {
     extensions: ['rs'],
     monacoLanguage: 'rust',
     tabSize: 4,
-    runtimeName: 'Rust · aislado',
+    runtimeName: 'Sin runtime en el navegador',
     analyzerName: 'Rust · analizador estructural',
     diagram: 'generic',
   },
@@ -205,84 +191,3 @@ function javaClassName(code: string): string {
   return publicType?.[1] ?? anyType?.[1] ?? 'Main'
 }
 
-export function getRuntimePlan(language: Language, code: string): RuntimePlan {
-  switch (language) {
-    case 'javascript':
-      return {
-        filename: 'main.mjs',
-        check: 'node',
-        installPackages: [],
-        run: { cmd: 'node', args: ['--max-old-space-size=256', 'main.mjs'], phase: 'run' },
-      }
-    case 'typescript':
-      return {
-        filename: 'main.ts',
-        check: 'bun',
-        installPackages: [],
-        run: { cmd: 'bun', args: ['main.ts'], phase: 'run' },
-      }
-    case 'python':
-      return {
-        filename: 'main.py',
-        check: 'python3',
-        installPackages: [],
-        run: { cmd: 'python3', args: ['main.py'], phase: 'run' },
-      }
-    case 'lua':
-      return {
-        filename: 'main.lua',
-        check: 'lua5.4',
-        installPackages: ['lua5.4'],
-        run: { cmd: 'lua5.4', args: ['main.lua'], phase: 'run' },
-      }
-    case 'java': {
-      const className = javaClassName(code)
-      return {
-        filename: `${className}.java`,
-        check: 'javac',
-        installPackages: ['default-jdk-headless'],
-        compile: { cmd: 'javac', args: [`${className}.java`], phase: 'compile' },
-        run: { cmd: 'java', args: [className], phase: 'run' },
-      }
-    }
-    case 'c':
-      return {
-        filename: 'main.c',
-        check: 'gcc',
-        installPackages: ['gcc'],
-        compile: { cmd: 'gcc', args: ['main.c', '-O2', '-o', 'main'], phase: 'compile' },
-        run: { cmd: './main', args: [], phase: 'run' },
-      }
-    case 'cpp':
-      return {
-        filename: 'main.cpp',
-        check: 'g++',
-        installPackages: ['g++'],
-        compile: { cmd: 'g++', args: ['main.cpp', '-O2', '-o', 'main'], phase: 'compile' },
-        run: { cmd: './main', args: [], phase: 'run' },
-      }
-    case 'csharp':
-      return {
-        filename: 'Program.cs',
-        check: 'mcs',
-        installPackages: ['mono-mcs'],
-        compile: { cmd: 'mcs', args: ['Program.cs', '-out:Program.exe'], phase: 'compile' },
-        run: { cmd: 'mono', args: ['Program.exe'], phase: 'run' },
-      }
-    case 'go':
-      return {
-        filename: 'main.go',
-        check: 'go',
-        installPackages: ['golang-go'],
-        run: { cmd: 'go', args: ['run', 'main.go'], phase: 'run' },
-      }
-    case 'rust':
-      return {
-        filename: 'main.rs',
-        check: 'rustc',
-        installPackages: ['rustc'],
-        compile: { cmd: 'rustc', args: ['main.rs', '-O', '-o', 'main'], phase: 'compile' },
-        run: { cmd: './main', args: [], phase: 'run' },
-      }
-  }
-}

@@ -5,6 +5,10 @@ const securityHeaders = [
   { key: 'Strict-Transport-Security', value: 'max-age=63072000' },
   { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // El aislamiento entre origenes habilita la memoria compartida: es lo que
+  // permite que el programa espere datos escribidos por la persona usuaria.
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
 ]
 
 const nextConfig = {

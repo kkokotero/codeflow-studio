@@ -5,7 +5,7 @@ import { CircleAlert, Keyboard, Layers3, ShieldAlert, type LucideIcon } from 'lu
 import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { MAX_EXECUTIONS_PER_MINUTE } from '@/lib/runtime-safety'
+import { MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
 import { LANGUAGE_DEFINITIONS, SUPPORTED_LANGUAGES } from '@/lib/languages'
 
 interface HelpDialogProps {
@@ -68,8 +68,8 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
         <div className="cf-help__hero">
           <h2 className="cf-help__title">Un programa, paso a paso.</h2>
           <p className="cf-help__lede">
-            CodeFlow convierte el código en un diagrama estático de control y lo ejecuta fuera del
-            navegador y del proceso de la aplicación, en un entorno aislado que se destruye al terminar.
+            CodeFlow convierte el código en un diagrama estático de control y lo ejecuta en tu
+            navegador, dentro de un Web Worker aislado que se destruye al terminar.
           </p>
           <ul className="cf-help__languages">
             {SUPPORTED_LANGUAGES.map((language) => (
@@ -117,12 +117,12 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
               <div className="cf-help__section-title"><ShieldAlert aria-hidden="true" /> Ejecución aislada</div>
               <p>
                 <CircleAlert aria-hidden="true" />
-                <span>Cada ejecución crea una microVM efímera de Vercel Sandbox. El código no corre en el navegador ni en el servidor de la app, no recibe secretos del proyecto, no tiene acceso a red y el entorno se elimina al terminar.</span>
+                <span>Cada ejecución corre en un Web Worker: sin DOM, sin red y sin secretos del proyecto. Python y Lua usan motores compilados a WebAssembly que se cargan en el navegador; al terminar, el worker se destruye.</span>
               </p>
             </section>
 
             <p className="cf-help__limit">
-              <strong>Límites:</strong> fuente hasta 50 KB, una vCPU y 2 GB de memoria, 15 segundos de compilación, máximo 8 segundos de ejecución y 16 KB de salida; el límite compartido es de {MAX_EXECUTIONS_PER_MINUTE.toLocaleString('es')} ejecuciones por minuto y dirección IP. La consola muestra stdout y stderr. El análisis es estático: no captura variables ni trazas paso a paso, y puede rechazar sintaxis no compatible en lugar de dibujar un flujo incompleto.
+              <strong>Límites:</strong> fuente hasta 50 KB, máximo {MAX_EXECUTION_TIME_MS / 1_000} segundos de ejecución y {Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB de salida. La consola muestra stdout y stderr en vivo y acepta datos por la entrada estándar. El análisis es estático: no captura variables ni trazas paso a paso, y puede rechazar sintaxis no compatible en lugar de dibujar un flujo incompleto.
             </p>
           </aside>
         </div>

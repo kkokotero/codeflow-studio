@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeCode } from './diagram'
 import { starterFiles } from './codeflow-examples'
-import { getRuntimePlan, isLanguage, languageFromFileName, SUPPORTED_LANGUAGES } from './languages'
+import { isLanguage, languageFromFileName, SUPPORTED_LANGUAGES } from './languages'
+import { getBrowserRuntime } from './runtimes'
 
 const kinds = (language: Parameters<typeof analyzeCode>[1], source: string) => {
   const graph = analyzeCode(source, language)
@@ -20,11 +21,9 @@ describe('multi-language support', () => {
     expect(languageFromFileName('main.unknown')).toBeNull()
   })
 
-  it('builds an execution plan for every language', () => {
-    for (const language of SUPPORTED_LANGUAGES) {
-      const plan = getRuntimePlan(language, '')
-      expect(plan.filename.length).toBeGreaterThan(0)
-      expect(plan.run.cmd.length).toBeGreaterThan(0)
+  it('has a browser runtime for the languages that can run locally', () => {
+    for (const language of ['javascript', 'typescript', 'python', 'lua'] as const) {
+      expect(getBrowserRuntime(language), language).toBeDefined()
     }
   })
 

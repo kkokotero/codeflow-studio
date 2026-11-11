@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { prepareLocalCode, stripTypeScript } from './local-runtime'
+import { prepareLocalCode, stripTypeScript } from './javascript'
 
 describe('preparación del código local', () => {
   it('quita las anotaciones de TypeScript', () => {
