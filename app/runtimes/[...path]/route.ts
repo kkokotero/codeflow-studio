@@ -12,8 +12,15 @@ export const runtime = 'nodejs'
  * servidor.
  */
 
-const ALLOWED_ROOTS = ['pyodide/', 'wasmoon/dist/']
-const ALLOWED_EXTENSIONS = ['.js', '.mjs', '.wasm', '.zip', '.json']
+const ALLOWED_ROOTS = [
+  'pyodide/',
+  'wasmoon/dist/',
+  'yaegi-wasm/src/',
+  '@live-codes/clang-wasm/dist/',
+  '@live-codes/clang-wasm/assets/',
+  '@live-codes/java-wasm/dist/',
+]
+const ALLOWED_EXTENSIONS = ['.js', '.mjs', '.wasm', '.zip', '.json', '.gz', '.bin']
 
 const MIME_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -21,6 +28,8 @@ const MIME_TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
   '.zip': 'application/zip',
   '.json': 'application/json; charset=utf-8',
+  '.gz': 'application/gzip',
+  '.bin': 'application/octet-stream',
 }
 
 export async function GET(

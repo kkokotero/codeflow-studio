@@ -1,4 +1,7 @@
 import type { Language } from '@/lib/languages'
+import { cRuntime, cppRuntime } from '@/lib/runtimes/clang'
+import { goRuntime } from '@/lib/runtimes/go'
+import { javaRuntime } from '@/lib/runtimes/java'
 import { javascriptRuntime } from '@/lib/runtimes/javascript'
 import { luaRuntime } from '@/lib/runtimes/lua'
 import { pythonRuntime } from '@/lib/runtimes/python'
@@ -16,6 +19,10 @@ export const BROWSER_RUNTIMES: Partial<Record<Language, BrowserRuntime>> = {
   typescript: javascriptRuntime,
   python: pythonRuntime,
   lua: luaRuntime,
+  go: goRuntime,
+  c: cRuntime,
+  cpp: cppRuntime,
+  java: javaRuntime,
 }
 
 /** Devuelve el runtime del lenguaje, si existe en el navegador. */

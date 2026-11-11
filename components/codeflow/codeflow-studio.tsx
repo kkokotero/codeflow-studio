@@ -256,6 +256,8 @@ export function CodeflowStudio() {
   const [notice, setNotice] = useState('')
   /** Texto que pide el programa por la entrada estándar. */
   const [inputPrompt, setInputPrompt] = useState<string | null>(null)
+  /** Descarga en curso de las herramientas del runtime. */
+  const [runtimeProgress, setRuntimeProgress] = useState<{ label: string; loaded: number; total: number } | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' })
   const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
@@ -589,7 +591,7 @@ export function CodeflowStudio() {
     setStatus('running')
     setLogs([])
     setInputPrompt(null)
-    setNotice(`Ejecutando en el navegador · ${runtime.place}…`)
+    setRuntimeProgress(null)
 
     const handle = runtime.run({
       code: prepared,
@@ -603,10 +605,12 @@ export function CodeflowStudio() {
         })
       },
       onReset: () => setLogs([]),
+      onProgress: (progress) => setRuntimeProgress(progress),
       onInputRequest: (prompt) => setInputPrompt(prompt),
       onExit: (result) => {
         localRuntimeRef.current = null
         setInputPrompt(null)
+        setRuntimeProgress(null)
         finishExecution(file, result)
       },
     })
@@ -1722,6 +1726,7 @@ export function CodeflowStudio() {
                 onClear={clearConsole}
                 onCopy={() => void copyConsole()}
                 inputPrompt={inputPrompt}
+                progress={runtimeProgress}
                 onSendInput={sendConsoleInput}
                 onInterrupt={cancelExecution}
                 height={consoleCollapsed ? undefined : layout.console}

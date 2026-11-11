@@ -1,4 +1,5 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
+import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
 
 /**
  * Runtime de Lua en el navegador.
@@ -16,6 +17,8 @@ const pending = []
 const send = (message) => self.postMessage(message)
 const emit = (stream, text) => send({ type: 'output', stream, text: text.endsWith('\\n') ? text : text + '\\n' })
 
+${PROGRESS_HELPER}
+
 self.onmessage = async (event) => {
   const data = event.data
   if (!data) return
@@ -28,6 +31,7 @@ self.onmessage = async (event) => {
   if (data.type !== 'run') return
 
   try {
+    await warmAssets([{ url: '${origin}${LUA_WASM_PATH}', label: 'Lua' }])
     importScripts('${origin}${WASMOON_PATH}')
     const factory = new self.wasmoon.LuaFactory('${origin}${LUA_WASM_PATH}')
     const engine = await factory.createEngine()
@@ -90,9 +94,15 @@ export const luaRuntime: BrowserRuntime = {
     worker.onmessage = (event: MessageEvent) => {
       const data = event.data as
         | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
+        | { type: 'progress'; label: string; loaded: number; total: number }
         | { type: 'done'; exitCode: number }
         | undefined
       if (!data) return
+
+      if (data.type === 'progress') {
+        options.onProgress?.({ label: data.label, loaded: data.loaded, total: data.total })
+        return
+      }
 
       if (data.type === 'output') {
         bytes += data.text.length

@@ -27,6 +27,8 @@ export interface RuntimeOptions {
   onOutput: (chunk: RuntimeOutput) => void
   /** El runtime reinicia la salida: el programa vuelve a empezar. */
   onReset?: () => void
+  /** Descarga de las herramientas del runtime: el usuario ve el avance. */
+  onProgress?: (progress: { label: string; loaded: number; total: number }) => void
   /** El programa pide una línea por la entrada estándar. */
   onInputRequest?: (prompt: string) => void
   /** La ejecución ha terminado. */

@@ -1,4 +1,5 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
+import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
 
 /**
  * Runtime de Python en el navegador.
@@ -22,8 +23,14 @@ let needsInput = false
 const send = (message) => self.postMessage(message)
 const emit = (stream, text) => send({ type: 'output', stream, text: text.endsWith('\\n') ? text : text + '\\n' })
 
+${PROGRESS_HELPER}
+
 const loadRuntime = async () => {
   if (pyodide) return pyodide
+  await warmAssets([
+    { url: '${origin}${PYODIDE_INDEX_PATH}pyodide.asm.wasm', label: 'Pyodide' },
+    { url: '${origin}${PYODIDE_INDEX_PATH}python_stdlib.zip', label: 'biblioteca estándar' },
+  ])
   const { loadPyodide } = await import('${origin}${PYODIDE_PATH}')
   pyodide = await loadPyodide({ indexURL: '${origin}${PYODIDE_INDEX_PATH}' })
   return pyodide
@@ -118,6 +125,7 @@ export const pythonRuntime: BrowserRuntime = {
     worker.onmessage = (event: MessageEvent) => {
       const data = event.data as
         | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
+        | { type: 'progress'; label: string; loaded: number; total: number }
         | { type: 'reset' }
         | { type: 'needs-input' }
         | { type: 'done'; exitCode: number }
@@ -128,6 +136,11 @@ export const pythonRuntime: BrowserRuntime = {
         output.length = 0
         bytes = 0
         options.onReset?.()
+        return
+      }
+
+      if (data.type === 'progress') {
+        options.onProgress?.({ label: data.label, loaded: data.loaded, total: data.total })
         return
       }
 

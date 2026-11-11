@@ -32,6 +32,8 @@ interface ConsolePanelProps {
   onCopy?: () => void
   /** Texto que pide el programa por la entrada estándar. */
   inputPrompt?: string | null
+  /** Descarga en curso de las herramientas del runtime. */
+  progress?: { label: string; loaded: number; total: number } | null
   /** Envía una línea a la entrada estándar del programa. */
   onSendInput?: (line: string) => void
   /** El usuario ha pedido detener el programa. */
@@ -56,6 +58,7 @@ export function ConsolePanel({
   onClear,
   onCopy,
   inputPrompt,
+  progress,
   onSendInput,
   onInterrupt,
 }: ConsolePanelProps) {
@@ -128,25 +131,49 @@ export function ConsolePanel({
         </div>
       </header>
       {!collapsed && (
-        <div className="cf-console__body">
-          <ConsoleTerminal
-            logs={logs}
-            runNotice={runNotice}
-            inputPrompt={inputPrompt}
-            onSendInput={onSendInput}
-            onInterrupt={onInterrupt}
-            onCopy={() => void copyOutput()}
-          />
-          {!logs.length && status !== 'running' && (
-            <p className="cf-console__empty">
-              {status === 'complete'
-                ? 'La ejecución terminó sin escribir en la salida estándar.'
-                : status === 'error'
-                  ? 'La ejecución falló antes de producir salida.'
-                  : 'Ejecuta el archivo para ver aquí stdout y stderr.'}
-            </p>
+        <>
+          {progress && (
+            <div className="cf-console__progress" role="status">
+              <div className="cf-console__progress-head">
+                <APP_ICONS.download aria-hidden="true" />
+                <span>Descargando {progress.label}…</span>
+                <strong>
+                  {progress.total > 0
+                    ? `${Math.round(progress.loaded / progress.total * 100)}%`
+                    : `${Math.round(progress.loaded / 1024)} KB`}
+                </strong>
+              </div>
+              <div className="cf-console__progress-track">
+                <span
+                  style={{
+                    width: progress.total > 0
+                      ? `${Math.min(100, progress.loaded / progress.total * 100)}%`
+                      : '100%',
+                  }}
+                />
+              </div>
+            </div>
           )}
-        </div>
+          <div className="cf-console__body">
+            <ConsoleTerminal
+              logs={logs}
+              runNotice={runNotice}
+              inputPrompt={inputPrompt}
+              onSendInput={onSendInput}
+              onInterrupt={onInterrupt}
+              onCopy={() => void copyOutput()}
+            />
+            {!logs.length && status !== 'running' && (
+              <p className="cf-console__empty">
+                {status === 'complete'
+                  ? 'La ejecución terminó sin escribir en la salida estándar.'
+                  : status === 'error'
+                    ? 'La ejecución falló antes de producir salida.'
+                    : 'Ejecuta el archivo para ver aquí stdout y stderr.'}
+              </p>
+            )}
+          </div>
+        </>
       )}
     </section>
   )

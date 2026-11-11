@@ -1969,6 +1969,41 @@
   font: var(--cf-text-sm)/1.7 var(--cf-font-mono);
 }
 
+/* Barra de descarga de las herramientas del runtime. */
+.cf-console__progress {
+  display: grid;
+  gap: 6px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--cf-line-soft);
+  background: var(--cf-surface-panel);
+}
+
+.cf-console__progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cf-text-muted);
+  font-size: var(--cf-text-xs);
+}
+
+.cf-console__progress-head svg { width: 13px; height: 13px; flex: 0 0 13px; color: var(--cf-accent); }
+.cf-console__progress-head strong { margin-left: auto; color: var(--cf-text); font: var(--cf-text-xs) var(--cf-font-mono); }
+
+.cf-console__progress-track {
+  overflow: hidden;
+  height: 5px;
+  border-radius: var(--cf-radius-pill);
+  background: var(--cf-surface-hover);
+}
+
+.cf-console__progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cf-accent), var(--md-sys-color-tertiary, var(--cf-accent)));
+  transition: width 200ms var(--cf-motion);
+}
+
 /* Terminal: xterm.js con los mismos colores que el editor de código. */
 .cf-terminal {
   flex: 1;

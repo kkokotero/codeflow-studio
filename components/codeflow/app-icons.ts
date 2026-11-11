@@ -74,6 +74,7 @@ export const APP_ICONS = {
   duplicate: Copy,
   delete: Trash2,
   copy: Copy,
+  download: Download,
   more: Ellipsis,
   home: House,
   open: FolderOpen,
