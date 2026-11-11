@@ -21,10 +21,6 @@ interface ConsolePanelProps {
   status: RunStatus
   /** Resultado de la última ejecución, siempre visible en el cuerpo. */
   runNotice: string
-  /** Aviso informativo del entorno, que se puede cerrar. */
-  hint: string
-  hintHidden: boolean
-  onDismissHint: () => void
   collapsed: boolean
   height?: number
   onToggleCollapsed: () => void
@@ -44,9 +40,6 @@ export function ConsolePanel({
   logs,
   status,
   runNotice,
-  hint,
-  hintHidden,
-  onDismissHint,
   collapsed,
   height,
   onToggleCollapsed,
@@ -112,15 +105,6 @@ export function ConsolePanel({
       </header>
       {!collapsed && (
         <>
-          {!hintHidden && (
-            <div className="cf-console__hint">
-              <APP_ICONS.info aria-hidden="true" />
-              <span>{hint}</span>
-              <button type="button" aria-label="Cerrar el aviso del entorno" title="Cerrar el aviso" onClick={onDismissHint}>
-                <APP_ICONS.close aria-hidden="true" />
-              </button>
-            </div>
-          )}
           <div className="cf-console__body" role="log" aria-live="polite" aria-label="Salida del programa">
             {runNotice ? <p className="cf-console__system">{runNotice}</p> : null}
             {logs.length ? (
@@ -136,7 +120,7 @@ export function ConsolePanel({
                 ? 'La ejecución terminó sin escribir en la salida estándar.'
                 : status === 'error'
                   ? 'La ejecución falló antes de producir salida.'
-                  : 'Ejecuta el archivo para ver aquí stdout y stderr. Cada proceso corre en una microVM desechable, sin red.'}
+                  : 'Ejecuta el archivo para ver aquí stdout y stderr.'}
             </p>
           )}
           </div>

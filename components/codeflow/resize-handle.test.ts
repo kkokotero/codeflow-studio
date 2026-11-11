@@ -5,10 +5,10 @@ import { mergePersistentValue } from '@/components/codeflow/resize-handle'
 interface Layout {
   files: number
   expanded: string[]
-  hiddenNotices: string[]
+  consoleCollapsed: boolean
 }
 
-const defaults: Layout = { files: 240, expanded: [], hiddenNotices: [] }
+const defaults: Layout = { files: 240, expanded: [], consoleCollapsed: false }
 
 describe('estado persistente', () => {
   it('añade los campos que falten en un valor guardado', () => {
@@ -17,14 +17,14 @@ describe('estado persistente', () => {
 
     expect(merged.files).toBe(320)
     expect(merged.expanded).toEqual([])
-    expect(merged.hiddenNotices).toEqual([])
+    expect(merged.consoleCollapsed).toBe(false)
   })
 
   it('conserva los arrays guardados', () => {
-    const merged = mergePersistentValue(defaults, { expanded: ['a'], hiddenNotices: ['runtime'] })
+    const merged = mergePersistentValue(defaults, { expanded: ['a'], consoleCollapsed: true })
 
     expect(merged.expanded).toEqual(['a'])
-    expect(merged.hiddenNotices).toEqual(['runtime'])
+    expect(merged.consoleCollapsed).toBe(true)
   })
 
   it('sustituye el valor cuando no es un objeto', () => {

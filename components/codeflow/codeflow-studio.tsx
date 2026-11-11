@@ -56,7 +56,7 @@ import {
   isLanguage,
   languageFromFileName,
 } from '@/lib/languages'
-import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
+import { EXECUTION_LIMIT_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
 import {
   createEmptyState,
   createFile,
@@ -103,8 +103,6 @@ interface LayoutState {
   consoleCollapsed: boolean
   inspectorTab: InspectorTab
   view: View
-  /** Avisos cerrados por el usuario en cada vista. */
-  hiddenNotices: string[]
 }
 
 const DEFAULT_LAYOUT: LayoutState = {
@@ -116,7 +114,6 @@ const DEFAULT_LAYOUT: LayoutState = {
   consoleCollapsed: false,
   inspectorTab: 'symbols',
   view: 'home',
-  hiddenNotices: [],
 }
 
 type DialogState =
@@ -402,20 +399,6 @@ export function CodeflowStudio() {
   const updateLayout = useCallback((patch: Partial<LayoutState>) => {
     setLayout((current) => ({ ...current, ...patch }))
   }, [setLayout])
-
-  const hideNotice = useCallback((id: string) => {
-    setLayout((current) => current.hiddenNotices.includes(id)
-      ? current
-      : { ...current, hiddenNotices: [...current.hiddenNotices, id] })
-  }, [setLayout])
-
-  const showNotice = useCallback((id: string) => {
-    setLayout((current) => ({ ...current, hiddenNotices: current.hiddenNotices.filter((item) => item !== id) }))
-  }, [setLayout])
-
-  const hiddenNotices = Array.isArray(layout.hiddenNotices) ? layout.hiddenNotices : []
-  const runtimeNoticeHidden = hiddenNotices.includes('runtime')
-  const analysisNoticeHidden = hiddenNotices.includes('analysis')
 
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
@@ -1084,34 +1067,6 @@ export function CodeflowStudio() {
           <div className="cf-toolbar__trailing">
             {isStudio && (
               <>
-                {(runtimeNoticeHidden || analysisNoticeHidden) && (
-                  <div className="cf-toolbar__restores">
-                    {runtimeNoticeHidden && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="cf-icon-button cf-restore-button"
-                        aria-label="Mostrar el aviso del entorno"
-                        title="Mostrar el aviso del entorno"
-                        onClick={() => showNotice('runtime')}
-                      >
-                        <APP_ICONS.info aria-hidden="true" />
-                      </Button>
-                    )}
-                    {analysisNoticeHidden && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="cf-icon-button cf-restore-button"
-                        aria-label="Mostrar el aviso de análisis estático"
-                        title="Mostrar el aviso de análisis estático"
-                        onClick={() => showNotice('analysis')}
-                      >
-                        <APP_ICONS.analysis aria-hidden="true" />
-                      </Button>
-                    )}
-                  </div>
-                )}
                 {isRuntimeBusy ? (
                   <Button size="default" className="cf-run-button cf-run-button--busy" onClick={cancelExecution} aria-label="Detener ejecución" title="Detener ejecución">
                     <APP_ICONS.stop aria-hidden="true" />
@@ -1409,14 +1364,6 @@ export function CodeflowStudio() {
                     <span className="cf-count">{graph.nodes.length} nodos</span>
                   </div>
                   <div className="cf-pane-header__actions">
-                    {!analysisNoticeHidden && (
-                      <span className="cf-static-badge">
-                        Análisis estático
-                        <button type="button" aria-label="Cerrar el aviso de análisis estático" title="Cerrar el aviso" onClick={() => hideNotice('analysis')}>
-                          <APP_ICONS.close aria-hidden="true" />
-                        </button>
-                      </span>
-                    )}
                     <Menu>
                       <MenuTrigger
                         render={<Button variant="ghost" size="icon-xs" />}
@@ -1549,9 +1496,6 @@ export function CodeflowStudio() {
               logs={logs}
               status={status}
               runNotice={notice}
-              hint={EXECUTION_READY_NOTICE}
-              hintHidden={runtimeNoticeHidden}
-              onDismissHint={() => hideNotice('runtime')}
               collapsed={consoleCollapsed}
               onToggleCollapsed={() => updateLayout({ consoleCollapsed: !consoleCollapsed })}
               onClear={clearConsole}

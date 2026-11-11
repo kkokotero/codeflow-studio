@@ -1233,23 +1233,6 @@
   background: var(--cf-surface-canvas);
 }
 
-.cf-static-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--cf-text-subtle);
-  font-size: var(--cf-text-xs);
-  white-space: nowrap;
-}
-
-.cf-static-badge::before {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--cf-accent);
-  content: '';
-}
-
 .cf-legend {
   display: flex;
   align-items: center;
@@ -2124,25 +2107,8 @@
 .cf-back-button svg { width: 14px; height: 14px; }
 
 /* --------------------------------------------------------------------- */
-/* Avisos descartables                                                    */
+/* Salida de la consola                                                   */
 /* --------------------------------------------------------------------- */
-
-.cf-console__hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px 7px 12px;
-  border-bottom: 1px solid var(--cf-line-soft);
-  background: var(--cf-surface-panel);
-  color: var(--cf-text-muted);
-  font-size: var(--cf-text-xs);
-}
-
-.cf-console__hint > svg { width: 13px; height: 13px; flex: 0 0 13px; color: var(--cf-text-subtle); }
-.cf-console__hint > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cf-console__hint button { display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px; border: 0; border-radius: 5px; background: transparent; color: var(--cf-text-subtle); }
-.cf-console__hint button:hover { background: var(--cf-surface-hover); color: var(--cf-text); }
-.cf-console__hint button svg { width: 12px; height: 12px; }
 
 .cf-console__system {
   margin: 0 0 8px;
@@ -2152,43 +2118,6 @@
   font-family: var(--cf-font);
   font-size: var(--cf-text-xs);
 }
-
-.cf-static-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 4px 0 0;
-  border-radius: 6px;
-  color: var(--cf-text-subtle);
-  font-size: var(--cf-text-xs);
-  white-space: nowrap;
-}
-
-.cf-static-badge::before {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--cf-accent);
-  content: '';
-}
-
-.cf-static-badge button {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--cf-text-subtle);
-}
-
-.cf-static-badge button:hover { background: var(--cf-surface-hover); color: var(--cf-text); }
-.cf-static-badge button svg { width: 11px; height: 11px; }
-
-.cf-toolbar__restores { display: flex; align-items: center; gap: 2px; margin-right: 2px; }
-.cf-restore-button { color: var(--cf-text-subtle); }
-.cf-restore-button:hover { color: var(--cf-accent); }
 
 /* --------------------------------------------------------------------- */
 /* Opciones de formato en los diálogos de exportación                      */

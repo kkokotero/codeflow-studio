@@ -35,7 +35,6 @@ import {
   Pencil,
   Play,
   Repeat2,
-  ScanSearch,
   Sun,
   Terminal,
   Trash2,
@@ -86,8 +85,6 @@ export const APP_ICONS = {
   back: ArrowLeft,
   info: Info,
   close: X,
-  analysis: ScanSearch,
-
   // Paneles y destinos
   code: FileCode2,
   flow: GitBranch,
