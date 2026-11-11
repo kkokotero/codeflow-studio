@@ -3,11 +3,11 @@
 import dynamic from 'next/dynamic'
 import type { OnMount } from '@monaco-editor/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { LoaderCircle, Search, X } from 'lucide-react'
+import { LoaderCircle, Search, X, type LucideIcon } from 'lucide-react'
 
 import { APP_ICONS, NODE_ICONS } from '@/components/codeflow/app-icons'
 import { AchievementsView } from '@/components/codeflow/achievements-view'
-import { AppearanceMenu, useMaterialTheme } from '@/components/codeflow/appearance-menu'
+import { AppearancePanel, useMaterialTheme } from '@/components/codeflow/appearance-menu'
 import { ConsolePanel } from '@/components/codeflow/console-panel'
 import { DiagramExportDialog, ProjectExportDialog } from '@/components/codeflow/export-dialogs'
 import { FileTree, type FileTreeActions } from '@/components/codeflow/file-tree'
@@ -93,6 +93,26 @@ type MonacoInstance = Parameters<OnMount>[1]
 type InspectorTab = 'symbols' | 'history'
 type MobilePane = 'files' | 'editor' | 'diagram' | 'inspector'
 type View = 'home' | 'studio' | 'achievements'
+/** Secciones del estudio que se pueden plegar por completo. */
+type SectionId = 'files' | 'editor' | 'diagram' | 'inspector' | 'console'
+
+const SECTION_LABELS: Record<SectionId, string> = {
+  files: 'el explorador',
+  editor: 'el editor',
+  diagram: 'el diagrama',
+  inspector: 'el inspector',
+  console: 'la consola',
+}
+
+const SECTION_ICONS: Record<SectionId, LucideIcon> = {
+  files: APP_ICONS.files,
+  editor: APP_ICONS.code,
+  diagram: APP_ICONS.flow,
+  inspector: APP_ICONS.inspector,
+  console: APP_ICONS.console,
+}
+
+const SECTION_ORDER: SectionId[] = ['files', 'editor', 'diagram', 'inspector', 'console']
 
 interface LayoutState {
   files: number
@@ -103,6 +123,8 @@ interface LayoutState {
   consoleCollapsed: boolean
   inspectorTab: InspectorTab
   view: View
+  /** Secciones plegadas por completo: su icono queda en la barra para volver a abrirlas. */
+  closedSections: SectionId[]
 }
 
 const DEFAULT_LAYOUT: LayoutState = {
@@ -114,6 +136,7 @@ const DEFAULT_LAYOUT: LayoutState = {
   consoleCollapsed: false,
   inspectorTab: 'symbols',
   view: 'home',
+  closedSections: [],
 }
 
 type DialogState =
@@ -398,6 +421,40 @@ export function CodeflowStudio() {
 
   const updateLayout = useCallback((patch: Partial<LayoutState>) => {
     setLayout((current) => ({ ...current, ...patch }))
+  }, [setLayout])
+
+  const closedSections = useMemo(
+    () => (Array.isArray(layout.closedSections) ? layout.closedSections.filter((id): id is SectionId => SECTION_ORDER.includes(id as SectionId)) : []),
+    [layout.closedSections],
+  )
+
+  const isSectionClosed = useCallback((id: SectionId) => closedSections.includes(id), [closedSections])
+
+  const setSectionClosed = useCallback((id: SectionId, closed: boolean) => {
+    setLayout((current) => {
+      const currentClosed = Array.isArray(current.closedSections) ? current.closedSections : []
+      return {
+        ...current,
+        closedSections: closed
+          ? [...new Set([...currentClosed, id])] as SectionId[]
+          : currentClosed.filter((section) => section !== id) as SectionId[],
+      }
+    })
+  }, [setLayout])
+
+  /** Redimensiona una sección y la pliega si se squeeza demasiado. */
+  const resizeSection = useCallback((id: 'files' | 'editor' | 'inspector', delta: number, min: number, max: number) => {
+    const next = layout[id] + delta
+    if (next < min) {
+      setSectionClosed(id, true)
+      return
+    }
+    updateLayout({ [id]: clamp(next, min, max) })
+  }, [layout, setSectionClosed, updateLayout])
+
+  const resetLayout = useCallback(() => {
+    setLayout((current) => ({ ...DEFAULT_LAYOUT, view: current.view, expanded: current.expanded }))
+    setNotice('Layout restablecido.')
   }, [setLayout])
 
   const updateActiveCode = useCallback((code: string) => {
@@ -1065,6 +1122,26 @@ export function CodeflowStudio() {
           </div>
 
           <div className="cf-toolbar__trailing">
+            {isStudio && closedSections.length > 0 && (
+              <div className="cf-toolbar__sections" role="group" aria-label="Secciones cerradas">
+                {SECTION_ORDER.filter((id) => isSectionClosed(id)).map((id) => {
+                  const Icon = SECTION_ICONS[id]
+                  return (
+                    <Button
+                      key={id}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="cf-icon-button cf-icon-button--section"
+                      aria-label={`Abrir ${SECTION_LABELS[id]}`}
+                      title={`Abrir ${SECTION_LABELS[id]}`}
+                      onClick={() => setSectionClosed(id, false)}
+                    >
+                      <Icon aria-hidden="true" />
+                    </Button>
+                  )
+                })}
+              </div>
+            )}
             {isStudio && (
               <>
                 {isRuntimeBusy ? (
@@ -1091,7 +1168,14 @@ export function CodeflowStudio() {
               </>
             )}
 
-            <AppearanceMenu mode={mode} seed={seed} isDark={isDark} onModeChange={setMode} onSeedChange={setSeed} />
+            <AppearancePanel
+              mode={mode}
+              seed={seed}
+              isDark={isDark}
+              onModeChange={setMode}
+              onSeedChange={setSeed}
+              onResetLayout={resetLayout}
+            />
 
             <Button
               variant="ghost"
@@ -1146,6 +1230,7 @@ export function CodeflowStudio() {
                       <MenuGroupLabel>Vista</MenuGroupLabel>
                       <MenuItem icon={APP_ICONS.copy} onClick={() => void copyCode()}>Copiar código</MenuItem>
                       <MenuItem icon={APP_ICONS.delete} onClick={restoreStarter} disabled={!starterTemplate}>Restaurar ejemplo</MenuItem>
+                      <MenuItem icon={APP_ICONS.layout} onClick={resetLayout}>Restablecer el layout</MenuItem>
                     </MenuGroup>
                   </>
                 ) : (
@@ -1180,340 +1265,406 @@ export function CodeflowStudio() {
                 '--cf-w-inspector': `${layout.inspector}px`,
               } as React.CSSProperties}
             >
-              <aside className={`cf-files ${mobilePane === 'files' ? 'is-mobile-active' : ''}`} aria-label="Archivos del proyecto">
-                <div className="cf-pane-header">
-                  <h2 className="cf-pane-title">Explorador</h2>
-                  <div className="cf-pane-header__actions">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setDialog({ kind: 'new-folder', parentId: null })}
-                      aria-label="Nueva carpeta"
-                      title="Nueva carpeta"
-                      disabled={isRuntimeBusy}
-                    >
-                      <APP_ICONS.newFolder aria-hidden="true" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setDialog({ kind: 'new-file', folderId: null })}
-                      aria-label="Nuevo archivo"
-                      title="Nuevo archivo"
-                      disabled={isRuntimeBusy}
-                    >
-                      <APP_ICONS.newFile aria-hidden="true" />
-                    </Button>
-                  </div>
-                </div>
-                <label className="cf-search">
-                  <Search aria-hidden="true" />
-                  <input
-                    ref={fileSearchRef}
-                    value={fileFilter}
-                    onChange={(event) => setFileFilter(event.target.value)}
-                    placeholder="Filtrar archivos"
-                    aria-label="Filtrar archivos"
-                  />
-                  <kbd>⌘P</kbd>
-                </label>
-                <div className="cf-file-list">
-                  {fileFilter.trim() ? (
-                    filteredFiles.map((file) => (
-                      <button
-                        key={file.id}
-                        className={`cf-file-row ${activeFileId === file.id ? 'is-active' : ''}`}
-                        type="button"
-                        onClick={() => openFile(file.id)}
+{!isSectionClosed('files') && (
+<>
+                <aside className={`cf-files ${mobilePane === 'files' ? 'is-mobile-active' : ''}`} aria-label="Archivos del proyecto">
+                  <div className="cf-pane-header">
+                    <h2 className="cf-pane-title">Explorador</h2>
+                    <div className="cf-pane-header__actions">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('files', true)}
+                        aria-label="Cerrar el explorador"
+                        title="Cerrar el explorador"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setDialog({ kind: 'new-folder', parentId: null })}
+                        aria-label="Nueva carpeta"
+                        title="Nueva carpeta"
                         disabled={isRuntimeBusy}
                       >
-                        <span className={`cf-language-mark cf-language-mark--${file.language}`} aria-hidden="true">
-                          {LANGUAGE_DEFINITIONS[file.language].mark}
-                        </span>
-                        <span className="cf-file-row__name">{file.name}</span>
-                      </button>
-                    ))
-                  ) : activeProject ? (
-                    <FileTree
-                      project={activeProject}
-                      expanded={Array.isArray(layout.expanded) ? layout.expanded : []}
-                      activeFileId={activeFileId}
-                      disabled={isRuntimeBusy}
-                      actions={treeActions}
-                    />
-                  ) : null}
-                  {fileFilter.trim() && filteredFiles.length === 0 && (
-                    <p className="cf-empty-inline">No se encontraron archivos</p>
-                  )}
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={`${acceptedFileExtensions()},.codeflow.json`}
-                  multiple
-                  className="visually-hidden"
-                  onChange={(event) => void importFiles(event.target.files)}
-                  aria-label="Seleccionar archivos para importar"
-                />
-              </aside>
-
-              <ResizeHandle
-                orientation="vertical"
-                label="Ajustar el ancho del explorador"
-                onResize={(delta) => updateLayout({ files: clamp(layout.files + delta, 160, 460) })}
-                onNudge={(delta) => updateLayout({ files: delta === 0 ? DEFAULT_LAYOUT.files : clamp(layout.files + delta, 160, 460) })}
-                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
-              />
-
-              <section className={`cf-panel cf-editor ${mobilePane === 'editor' ? 'is-mobile-active' : ''}`} aria-label="Editor de código">
-                <div className="cf-pane-header">
-                  <div className="cf-pane-title">
-                    <APP_ICONS.code aria-hidden="true" />
-                    <span className="cf-pane-title__file">{baseName(displayFileName) || 'Sin archivo'}</span>
-                    {historicalView && <span className="cf-chip cf-chip--warning">Solo lectura</span>}
+                        <APP_ICONS.newFolder aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setDialog({ kind: 'new-file', folderId: null })}
+                        aria-label="Nuevo archivo"
+                        title="Nuevo archivo"
+                        disabled={isRuntimeBusy}
+                      >
+                        <APP_ICONS.newFile aria-hidden="true" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="cf-pane-header__actions">
-                    {historicalView ? (
-                      <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button>
-                    ) : (
-                      <Menu>
-                        <MenuTrigger
-                          render={<Button variant="ghost" size="sm" />}
-                          className="cf-language-trigger"
-                          aria-label={`Lenguaje: ${LANGUAGE_DEFINITIONS[displayLanguage].label}. Cambiar lenguaje`}
-                          title="Lenguaje del archivo"
+                  <label className="cf-search">
+                    <Search aria-hidden="true" />
+                    <input
+                      ref={fileSearchRef}
+                      value={fileFilter}
+                      onChange={(event) => setFileFilter(event.target.value)}
+                      placeholder="Filtrar archivos"
+                      aria-label="Filtrar archivos"
+                    />
+                    <kbd>⌘P</kbd>
+                  </label>
+                  <div className="cf-file-list">
+                    {fileFilter.trim() ? (
+                      filteredFiles.map((file) => (
+                        <button
+                          key={file.id}
+                          className={`cf-file-row ${activeFileId === file.id ? 'is-active' : ''}`}
+                          type="button"
+                          onClick={() => openFile(file.id)}
+                          disabled={isRuntimeBusy}
                         >
-                          <span className={`cf-language-mark cf-language-mark--${displayLanguage}`} aria-hidden="true">
-                            {LANGUAGE_DEFINITIONS[displayLanguage].mark}
+                          <span className={`cf-language-mark cf-language-mark--${file.language}`} aria-hidden="true">
+                            {LANGUAGE_DEFINITIONS[file.language].mark}
                           </span>
-                          <span className="cf-language-trigger__label">{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
-                          <APP_ICONS.chevronDown aria-hidden="true" />
-                        </MenuTrigger>
-                        <MenuContent align="end" className="cf-menu--languages">
-                          <MenuRadioGroup value={displayLanguage} onValueChange={(value) => changeLanguage(value as Language)}>
-                            <MenuGroupLabel>Lenguaje del archivo</MenuGroupLabel>
-                            {SUPPORTED_LANGUAGES.map((language) => (
-                              <MenuRadioItem
-                                key={language}
-                                value={language}
-                                leading={<span className={`cf-language-mark cf-language-mark--${language}`} aria-hidden="true">{LANGUAGE_DEFINITIONS[language].mark}</span>}
-                              >
-                                <span className="cf-menu__stack">
-                                  <span className="cf-menu__label">{LANGUAGE_DEFINITIONS[language].label}</span>
-                                  <span className="cf-menu__hint">{LANGUAGE_DEFINITIONS[language].runtimeName}</span>
-                                </span>
-                              </MenuRadioItem>
-                            ))}
-                          </MenuRadioGroup>
-                        </MenuContent>
-                      </Menu>
+                          <span className="cf-file-row__name">{file.name}</span>
+                        </button>
+                      ))
+                    ) : activeProject ? (
+                      <FileTree
+                        project={activeProject}
+                        expanded={Array.isArray(layout.expanded) ? layout.expanded : []}
+                        activeFileId={activeFileId}
+                        disabled={isRuntimeBusy}
+                        actions={treeActions}
+                      />
+                    ) : null}
+                    {fileFilter.trim() && filteredFiles.length === 0 && (
+                      <p className="cf-empty-inline">No se encontraron archivos</p>
                     )}
                   </div>
-                </div>
-                <div className="cf-editor__surface">
-                  {activeFile ? (
-                    <CodeEditor
-                      key={`${activeFile.id}-${displayLanguage}-${historicalView?.id ?? 'current'}`}
-                      height="100%"
-                      language={LANGUAGE_DEFINITIONS[displayLanguage].monacoLanguage}
-                      value={displayCode}
-                      onChange={(value) => updateActiveCode(value ?? '')}
-                      onMount={handleEditorMount}
-                      theme={isDark ? 'codeflow-graphite' : 'codeflow-paper'}
-                      options={{
-                        automaticLayout: true,
-                        glyphMargin: false,
-                        lineNumbers: 'on',
-                        lineNumbersMinChars: 3,
-                        folding: true,
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'off',
-                        tabSize: LANGUAGE_DEFINITIONS[displayLanguage].tabSize,
-                        insertSpaces: true,
-                        suggestOnTriggerCharacters: true,
-                        quickSuggestions: true,
-                        accessibilitySupport: 'auto',
-                        readOnly: isRuntimeBusy || Boolean(historicalView),
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={`${acceptedFileExtensions()},.codeflow.json`}
+                    multiple
+                    className="visually-hidden"
+                    onChange={(event) => void importFiles(event.target.files)}
+                    aria-label="Seleccionar archivos para importar"
+                  />
+                </aside>
+
+                <ResizeHandle
+                  orientation="vertical"
+                  label="Ajustar el ancho del explorador"
+                  onResize={(delta) => resizeSection('files', delta, 160, 460)}
+                  onNudge={(delta) => updateLayout({ files: delta === 0 ? DEFAULT_LAYOUT.files : clamp(layout.files + delta, 160, 460) })}
+                  onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
+                />
+</>
+)}
+
+{!isSectionClosed('editor') && (
+<>
+                <section className={`cf-panel cf-editor ${mobilePane === 'editor' ? 'is-mobile-active' : ''}`} aria-label="Editor de código">
+                  <div className="cf-pane-header">
+                    <div className="cf-pane-title">
+                      <APP_ICONS.code aria-hidden="true" />
+                      <span className="cf-pane-title__file">{baseName(displayFileName) || 'Sin archivo'}</span>
+                      {historicalView && <span className="cf-chip cf-chip--warning">Solo lectura</span>}
+                    </div>
+                    <div className="cf-pane-header__actions">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('editor', true)}
+                        aria-label="Cerrar el editor"
+                        title="Cerrar el editor"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
+                      </Button>
+                      {historicalView ? (
+                        <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button>
+                      ) : (
+                        <Menu>
+                          <MenuTrigger
+                            render={<Button variant="ghost" size="sm" />}
+                            className="cf-language-trigger"
+                            aria-label={`Lenguaje: ${LANGUAGE_DEFINITIONS[displayLanguage].label}. Cambiar lenguaje`}
+                            title="Lenguaje del archivo"
+                          >
+                            <span className={`cf-language-mark cf-language-mark--${displayLanguage}`} aria-hidden="true">
+                              {LANGUAGE_DEFINITIONS[displayLanguage].mark}
+                            </span>
+                            <span className="cf-language-trigger__label">{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
+                            <APP_ICONS.chevronDown aria-hidden="true" />
+                          </MenuTrigger>
+                          <MenuContent align="end" className="cf-menu--languages">
+                            <MenuRadioGroup value={displayLanguage} onValueChange={(value) => changeLanguage(value as Language)}>
+                              <MenuGroupLabel>Lenguaje del archivo</MenuGroupLabel>
+                              {SUPPORTED_LANGUAGES.map((language) => (
+                                <MenuRadioItem
+                                  key={language}
+                                  value={language}
+                                  leading={<span className={`cf-language-mark cf-language-mark--${language}`} aria-hidden="true">{LANGUAGE_DEFINITIONS[language].mark}</span>}
+                                >
+                                  <span className="cf-menu__stack">
+                                    <span className="cf-menu__label">{LANGUAGE_DEFINITIONS[language].label}</span>
+                                    <span className="cf-menu__hint">{LANGUAGE_DEFINITIONS[language].runtimeName}</span>
+                                  </span>
+                                </MenuRadioItem>
+                              ))}
+                            </MenuRadioGroup>
+                          </MenuContent>
+                        </Menu>
+                      )}
+                    </div>
+                  </div>
+                  <div className="cf-editor__surface">
+                    {activeFile ? (
+                      <CodeEditor
+                        key={`${activeFile.id}-${displayLanguage}-${historicalView?.id ?? 'current'}`}
+                        height="100%"
+                        language={LANGUAGE_DEFINITIONS[displayLanguage].monacoLanguage}
+                        value={displayCode}
+                        onChange={(value) => updateActiveCode(value ?? '')}
+                        onMount={handleEditorMount}
+                        theme={isDark ? 'codeflow-graphite' : 'codeflow-paper'}
+                        options={{
+                          automaticLayout: true,
+                          glyphMargin: false,
+                          lineNumbers: 'on',
+                          lineNumbersMinChars: 3,
+                          folding: true,
+                          scrollBeyondLastLine: false,
+                          wordWrap: 'off',
+                          tabSize: LANGUAGE_DEFINITIONS[displayLanguage].tabSize,
+                          insertSpaces: true,
+                          suggestOnTriggerCharacters: true,
+                          quickSuggestions: true,
+                          accessibilitySupport: 'auto',
+                          readOnly: isRuntimeBusy || Boolean(historicalView),
+                        }}
+                      />
+                    ) : (
+                      <p className="cf-empty-inline cf-empty-inline--center">No hay archivos en este proyecto.</p>
+                    )}
+                  </div>
+                  <footer className="cf-editor__footer">
+                    <span>{lineCount} líneas</span>
+                    <span>{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
+                    <span>UTF-8</span>
+                    <span>Espacios: {LANGUAGE_DEFINITIONS[displayLanguage].tabSize}</span>
+                  </footer>
+                </section>
+
+                <ResizeHandle
+                  orientation="vertical"
+                  label="Ajustar el ancho del editor"
+                  onResize={(delta) => resizeSection('editor', delta, 260, 1400)}
+                  onNudge={(delta) => updateLayout({ editor: delta === 0 ? DEFAULT_LAYOUT.editor : clamp(layout.editor + delta, 260, 1400) })}
+                  onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
+                />
+</>
+)}
+
+{!isSectionClosed('diagram') && (
+<>
+                <section className={`cf-panel cf-diagram ${mobilePane === 'diagram' ? 'is-mobile-active' : ''}`} aria-label="Diagrama del código">
+                  <div className="cf-pane-header">
+                    <div className="cf-pane-title">
+                      <APP_ICONS.flow aria-hidden="true" />
+                      <span>Flujo</span>
+                      <span className="cf-count">{graph.nodes.length} nodos</span>
+                    </div>
+                    <div className="cf-pane-header__actions">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('diagram', true)}
+                        aria-label="Cerrar el diagrama"
+                        title="Cerrar el diagrama"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
+                      </Button>
+                      <Menu>
+                        <MenuTrigger
+                          render={<Button variant="ghost" size="icon-xs" />}
+                          className="cf-icon-button"
+                          aria-label="Acciones del diagrama"
+                          title="Acciones del diagrama"
+                        >
+                          <APP_ICONS.more aria-hidden="true" />
+                        </MenuTrigger>
+                        <MenuContent align="end">
+                          <MenuItem icon={APP_ICONS.exportDiagram} onClick={() => setDialog({ kind: 'export-diagram' })}>Exportar diagrama…</MenuItem>
+                          <MenuItem icon={APP_ICONS.delete} onClick={() => { setManualEdges([]); setNotice('Conexiones visuales eliminadas.') }} disabled={!manualEdges.length}>
+                            Quitar conexiones visuales
+                          </MenuItem>
+                        </MenuContent>
+                      </Menu>
+                    </div>
+                  </div>
+                  <div className="cf-diagram__surface">
+                    <FlowCanvas
+                      graph={graph}
+                      manualEdges={manualEdges}
+                      activeLine={null}
+                      activeOperationId={null}
+                      onSelectNode={(nodeId) => { recordProgress({ type: 'explore', feature: 'diagram' }); openLine(nodeId) }}
+                      onManualEdgesChange={setManualEdges}
+                      onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)}
+                    />
+                  </div>
+                  <footer className="cf-legend">
+                    <span><span className="cf-legend__shape cf-legend__shape--terminator" />Inicio / fin</span>
+                    <span><span className="cf-legend__shape cf-legend__shape--process" />Proceso</span>
+                    <span><span className="cf-legend__shape cf-legend__shape--decision" />Decisión</span>
+                    <span><span className="cf-legend__shape cf-legend__shape--io" />Entrada / salida</span>
+                    <span><span className="cf-legend__shape cf-legend__shape--connector" />Conector</span>
+                  </footer>
+                </section>
+
+                <ResizeHandle
+                  orientation="vertical"
+                  label="Ajustar el ancho del inspector"
+                  onResize={(delta) => resizeSection('inspector', -delta, 200, 520)}
+                  onNudge={(delta) => updateLayout({ inspector: delta === 0 ? DEFAULT_LAYOUT.inspector : clamp(layout.inspector - delta, 200, 520) })}
+                  onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
+                />
+</>
+)}
+
+{!isSectionClosed('inspector') && (
+<>
+                <aside className={`cf-panel cf-inspector ${mobilePane === 'inspector' ? 'is-mobile-active' : ''}`} aria-label="Inspector">
+                  {selectedNode ? (
+                    <FlowNodeEditor
+                      pseudo={selectedNode.data.pseudo}
+                      label={selectedNode.data.label}
+                      kindLabel={selectedNode.data.kind === 'operation' && selectedNode.data.operationCategory
+                        ? OPERATION_LABELS[selectedNode.data.operationCategory]
+                        : NODE_LABELS[selectedNode.data.kind]}
+                      language={displayLanguage}
+                      line={selectedNode.data.line}
+                      detail={selectedNode.data.detail.split(' · ')[0]}
+                      originalLine={activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''}
+                      readOnly={Boolean(historicalView)}
+                      conflicted={Boolean(activeFile) && (activeFile!.code.split('\n')[selectedNode.data.line - 1] ?? '') !== sourceLineOriginal}
+                      onApply={applySourceEdit}
+                      onClose={() => setSelectedNodeId(null)}
+                      onReloadLine={() => {
+                        const currentLine = activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''
+                        setSourceLineOriginal(currentLine)
                       }}
                     />
                   ) : (
-                    <p className="cf-empty-inline cf-empty-inline--center">No hay archivos en este proyecto.</p>
+                    <>
+                      <div className="cf-pane-header">
+                        <h2 className="cf-pane-title"><APP_ICONS.inspector aria-hidden="true" />Inspector</h2>
+                        <div className="cf-pane-header__actions">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => setSectionClosed('inspector', true)}
+                            aria-label="Cerrar el inspector"
+                            title="Cerrar el inspector"
+                          >
+                            <APP_ICONS.close aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="cf-tabs" role="tablist" aria-label="Panel del inspector">
+                        <button
+                          type="button"
+                          role="tab"
+                          id="cf-tab-symbols"
+                          aria-selected={inspectorTab === 'symbols'}
+                          aria-controls="cf-panel-inspector"
+                          className={inspectorTab === 'symbols' ? 'is-active' : ''}
+                          onClick={() => { updateLayout({ inspectorTab: 'symbols' }); recordProgress({ type: 'inspector', tab: 'symbols' }) }}
+                          onKeyDown={moveInspectorTab}
+                        >
+                          <APP_ICONS.symbols aria-hidden="true" />
+                          Símbolos
+                          <span className="cf-count">{graph.nodes.length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          id="cf-tab-history"
+                          aria-selected={inspectorTab === 'history'}
+                          aria-controls="cf-panel-inspector"
+                          className={inspectorTab === 'history' ? 'is-active' : ''}
+                          onClick={() => { updateLayout({ inspectorTab: 'history' }); recordProgress({ type: 'inspector', tab: 'history' }) }}
+                          onKeyDown={moveInspectorTab}
+                        >
+                          <APP_ICONS.history aria-hidden="true" />
+                          Historial
+                          <span className="cf-count">{snapshots.length}</span>
+                        </button>
+                      </div>
+                      <div className="cf-panel__body" role="tabpanel" id="cf-panel-inspector" aria-labelledby={inspectorTab === 'symbols' ? 'cf-tab-symbols' : 'cf-tab-history'}>
+                        {inspectorTab === 'symbols' ? (
+                          <SymbolList graph={graph} onSelect={openSymbol} />
+                        ) : (
+                          <HistoryList
+                            snapshots={snapshots}
+                            selectedSnapshots={selectedSnapshots}
+                            onOpen={selectSnapshot}
+                            onToggleCompare={toggleSnapshotSelection}
+                            compared={comparedSnapshots}
+                          />
+                        )}
+                      </div>
+                    </>
                   )}
-                </div>
-                <footer className="cf-editor__footer">
-                  <span>{lineCount} líneas</span>
-                  <span>{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
-                  <span>UTF-8</span>
-                  <span>Espacios: {LANGUAGE_DEFINITIONS[displayLanguage].tabSize}</span>
-                </footer>
-              </section>
-
-              <ResizeHandle
-                orientation="vertical"
-                label="Ajustar el ancho del editor"
-                onResize={(delta) => updateLayout({ editor: clamp(layout.editor + delta, 260, 1400) })}
-                onNudge={(delta) => updateLayout({ editor: delta === 0 ? DEFAULT_LAYOUT.editor : clamp(layout.editor + delta, 260, 1400) })}
-                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
-              />
-
-              <section className={`cf-panel cf-diagram ${mobilePane === 'diagram' ? 'is-mobile-active' : ''}`} aria-label="Diagrama del código">
-                <div className="cf-pane-header">
-                  <div className="cf-pane-title">
-                    <APP_ICONS.flow aria-hidden="true" />
-                    <span>Flujo</span>
-                    <span className="cf-count">{graph.nodes.length} nodos</span>
-                  </div>
-                  <div className="cf-pane-header__actions">
-                    <Menu>
-                      <MenuTrigger
-                        render={<Button variant="ghost" size="icon-xs" />}
-                        className="cf-icon-button"
-                        aria-label="Acciones del diagrama"
-                        title="Acciones del diagrama"
-                      >
-                        <APP_ICONS.more aria-hidden="true" />
-                      </MenuTrigger>
-                      <MenuContent align="end">
-                        <MenuItem icon={APP_ICONS.exportDiagram} onClick={() => setDialog({ kind: 'export-diagram' })}>Exportar diagrama…</MenuItem>
-                        <MenuItem icon={APP_ICONS.delete} onClick={() => { setManualEdges([]); setNotice('Conexiones visuales eliminadas.') }} disabled={!manualEdges.length}>
-                          Quitar conexiones visuales
-                        </MenuItem>
-                      </MenuContent>
-                    </Menu>
-                  </div>
-                </div>
-                <div className="cf-diagram__surface">
-                  <FlowCanvas
-                    graph={graph}
-                    manualEdges={manualEdges}
-                    activeLine={null}
-                    activeOperationId={null}
-                    onSelectNode={(nodeId) => { recordProgress({ type: 'explore', feature: 'diagram' }); openLine(nodeId) }}
-                    onManualEdgesChange={setManualEdges}
-                    onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)}
-                  />
-                </div>
-                <footer className="cf-legend">
-                  <span><span className="cf-legend__shape cf-legend__shape--terminator" />Inicio / fin</span>
-                  <span><span className="cf-legend__shape cf-legend__shape--process" />Proceso</span>
-                  <span><span className="cf-legend__shape cf-legend__shape--decision" />Decisión</span>
-                  <span><span className="cf-legend__shape cf-legend__shape--io" />Entrada / salida</span>
-                  <span><span className="cf-legend__shape cf-legend__shape--connector" />Conector</span>
-                </footer>
-              </section>
-
-              <ResizeHandle
-                orientation="vertical"
-                label="Ajustar el ancho del inspector"
-                onResize={(delta) => updateLayout({ inspector: clamp(layout.inspector - delta, 200, 520) })}
-                onNudge={(delta) => updateLayout({ inspector: delta === 0 ? DEFAULT_LAYOUT.inspector : clamp(layout.inspector - delta, 200, 520) })}
-                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
-              />
-
-              <aside className={`cf-panel cf-inspector ${mobilePane === 'inspector' ? 'is-mobile-active' : ''}`} aria-label="Inspector">
-                {selectedNode ? (
-                  <FlowNodeEditor
-                    pseudo={selectedNode.data.pseudo}
-                    label={selectedNode.data.label}
-                    kindLabel={selectedNode.data.kind === 'operation' && selectedNode.data.operationCategory
-                      ? OPERATION_LABELS[selectedNode.data.operationCategory]
-                      : NODE_LABELS[selectedNode.data.kind]}
-                    language={displayLanguage}
-                    line={selectedNode.data.line}
-                    detail={selectedNode.data.detail.split(' · ')[0]}
-                    originalLine={activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''}
-                    readOnly={Boolean(historicalView)}
-                    conflicted={Boolean(activeFile) && (activeFile!.code.split('\n')[selectedNode.data.line - 1] ?? '') !== sourceLineOriginal}
-                    onApply={applySourceEdit}
-                    onClose={() => setSelectedNodeId(null)}
-                    onReloadLine={() => {
-                      const currentLine = activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''
-                      setSourceLineOriginal(currentLine)
-                    }}
-                  />
-                ) : (
-                  <>
-                    <div className="cf-pane-header">
-                      <h2 className="cf-pane-title"><APP_ICONS.inspector aria-hidden="true" />Inspector</h2>
-                    </div>
-                    <div className="cf-tabs" role="tablist" aria-label="Panel del inspector">
-                      <button
-                        type="button"
-                        role="tab"
-                        id="cf-tab-symbols"
-                        aria-selected={inspectorTab === 'symbols'}
-                        aria-controls="cf-panel-inspector"
-                        className={inspectorTab === 'symbols' ? 'is-active' : ''}
-                        onClick={() => { updateLayout({ inspectorTab: 'symbols' }); recordProgress({ type: 'inspector', tab: 'symbols' }) }}
-                        onKeyDown={moveInspectorTab}
-                      >
-                        <APP_ICONS.symbols aria-hidden="true" />
-                        Símbolos
-                        <span className="cf-count">{graph.nodes.length}</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        id="cf-tab-history"
-                        aria-selected={inspectorTab === 'history'}
-                        aria-controls="cf-panel-inspector"
-                        className={inspectorTab === 'history' ? 'is-active' : ''}
-                        onClick={() => { updateLayout({ inspectorTab: 'history' }); recordProgress({ type: 'inspector', tab: 'history' }) }}
-                        onKeyDown={moveInspectorTab}
-                      >
-                        <APP_ICONS.history aria-hidden="true" />
-                        Historial
-                        <span className="cf-count">{snapshots.length}</span>
-                      </button>
-                    </div>
-                    <div className="cf-panel__body" role="tabpanel" id="cf-panel-inspector" aria-labelledby={inspectorTab === 'symbols' ? 'cf-tab-symbols' : 'cf-tab-history'}>
-                      {inspectorTab === 'symbols' ? (
-                        <SymbolList graph={graph} onSelect={openSymbol} />
-                      ) : (
-                        <HistoryList
-                          snapshots={snapshots}
-                          selectedSnapshots={selectedSnapshots}
-                          onOpen={selectSnapshot}
-                          onToggleCompare={toggleSnapshotSelection}
-                          compared={comparedSnapshots}
-                        />
-                      )}
-                    </div>
-                  </>
-                )}
-              </aside>
+                </aside>
+</>
+)}
             </div>
 
-            <ResizeHandle
-              orientation="horizontal"
-              label="Ajustar el alto de la consola"
-              onResize={(delta) => updateLayout({ console: clamp(layout.console - delta, 80, 520) })}
-              onNudge={(delta) => updateLayout({ console: delta === 0 ? DEFAULT_LAYOUT.console : clamp(layout.console - delta, 80, 520) })}
-              onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
-            />
+            {!isSectionClosed('console') && (
+            <>
+              <ResizeHandle
+                orientation="horizontal"
+                label="Ajustar el alto de la consola"
+                onResize={(delta) => {
+                  const next = layout.console - delta
+                  if (next < 80) {
+                    setSectionClosed('console', true)
+                    return
+                  }
+                  updateLayout({ console: clamp(next, 80, 520) })
+                }}
+                onNudge={(delta) => updateLayout({ console: delta === 0 ? DEFAULT_LAYOUT.console : clamp(layout.console - delta, 80, 520) })}
+                onCommit={() => recordProgress({ type: 'layout', action: 'adjusted' })}
+              />
 
-            <ConsolePanel
-              logs={logs}
-              status={status}
-              runNotice={notice}
-              collapsed={consoleCollapsed}
-              onToggleCollapsed={() => updateLayout({ consoleCollapsed: !consoleCollapsed })}
-              onClear={clearConsole}
-              onCopy={() => void copyConsole()}
-              height={consoleCollapsed ? undefined : layout.console}
-            />
+              <ConsolePanel
+                logs={logs}
+                status={status}
+                runNotice={notice}
+                onClose={() => setSectionClosed('console', true)}
+                collapsed={consoleCollapsed}
+                onToggleCollapsed={() => updateLayout({ consoleCollapsed: !consoleCollapsed })}
+                onClear={clearConsole}
+                onCopy={() => void copyConsole()}
+                height={consoleCollapsed ? undefined : layout.console}
+              />
+            </>
+            )}
 
             <nav className="cf-mobile-nav" aria-label="Vistas del editor">
-              <button type="button" className={mobilePane === 'files' ? 'is-active' : ''} aria-current={mobilePane === 'files' ? 'page' : undefined} onClick={() => setMobilePane('files')}>
+              <button type="button" className={mobilePane === 'files' ? 'is-active' : ''} aria-current={mobilePane === 'files' ? 'page' : undefined} onClick={() => { setMobilePane('files'); setSectionClosed('files', false) }}>
                 <APP_ICONS.folder aria-hidden="true" />Archivos
               </button>
-              <button type="button" className={mobilePane === 'editor' ? 'is-active' : ''} aria-current={mobilePane === 'editor' ? 'page' : undefined} onClick={() => setMobilePane('editor')}>
+              <button type="button" className={mobilePane === 'editor' ? 'is-active' : ''} aria-current={mobilePane === 'editor' ? 'page' : undefined} onClick={() => { setMobilePane('editor'); setSectionClosed('editor', false) }}>
                 <APP_ICONS.code aria-hidden="true" />Código
               </button>
-              <button type="button" className={mobilePane === 'diagram' ? 'is-active' : ''} aria-current={mobilePane === 'diagram' ? 'page' : undefined} onClick={() => setMobilePane('diagram')}>
+              <button type="button" className={mobilePane === 'diagram' ? 'is-active' : ''} aria-current={mobilePane === 'diagram' ? 'page' : undefined} onClick={() => { setMobilePane('diagram'); setSectionClosed('diagram', false) }}>
                 <APP_ICONS.flow aria-hidden="true" />Flujo
               </button>
-              <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} aria-current={mobilePane === 'inspector' ? 'page' : undefined} onClick={() => setMobilePane('inspector')}>
+              <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} aria-current={mobilePane === 'inspector' ? 'page' : undefined} onClick={() => { setMobilePane('inspector'); setSectionClosed('inspector', false) }}>
                 <APP_ICONS.inspector aria-hidden="true" />Inspector
               </button>
             </nav>

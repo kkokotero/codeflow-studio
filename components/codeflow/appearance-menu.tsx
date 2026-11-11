@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   argbFromHex,
   hexFromArgb,
@@ -8,18 +8,8 @@ import {
   SchemeExpressive,
 } from '@material/material-color-utilities'
 
-import { Button } from '@/components/ui/button'
-import {
-  Menu,
-  MenuContent,
-  MenuGroupLabel,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuSwatchItem,
-  MenuTrigger,
-} from '@/components/ui/menu'
 import { APP_ICONS } from '@/components/codeflow/app-icons'
+import { Button } from '@/components/ui/button'
 
 export type ColorMode = 'system' | 'light' | 'dark'
 
@@ -35,6 +25,12 @@ export const COLOR_PRESETS = [
 ] as const
 
 const MODE_STORAGE_KEY = 'codeflow-appearance-v1'
+
+const MODES: Array<{ id: ColorMode; label: string }> = [
+  { id: 'system', label: 'Automático' },
+  { id: 'light', label: 'Claro' },
+  { id: 'dark', label: 'Oscuro' },
+]
 
 function setColorToken(name: string, value: number) {
   document.documentElement.style.setProperty(name, hexFromArgb(value))
@@ -175,7 +171,6 @@ export function useMaterialTheme() {
     root.dataset.themeMode = mode
     root.dataset.colorScheme = isDark ? 'dark' : 'light'
     root.style.colorScheme = isDark ? 'dark' : 'light'
-    root.classList.toggle('dark', isDark)
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', hexFromArgb(scheme.surface))
   }, [isDark, mode, seed])
 
@@ -188,55 +183,278 @@ export function useMaterialTheme() {
   }
 }
 
-interface AppearanceMenuProps {
+interface Rgb {
+  r: number
+  g: number
+  b: number
+}
+
+interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value))
+}
+
+function hexToRgb(hex: string): Rgb | null {
+  const match = hex.replace('#', '').match(/^([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i)
+  if (!match) return null
+  return { r: parseInt(match[1], 16), g: parseInt(match[2], 16), b: parseInt(match[3], 16) }
+}
+
+function rgbToHex({ r, g, b }: Rgb): string {
+  const part = (value: number) => Math.round(Math.min(255, Math.max(0, value))).toString(16).padStart(2, '0')
+  return `#${part(r)}${part(g)}${part(b)}`
+}
+
+function rgbToHsl({ r, g, b }: Rgb): Hsl {
+  const red = r / 255
+  const green = g / 255
+  const blue = b / 255
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const lightness = (max + min) / 2
+  if (max === min) return { h: 0, s: 0, l: lightness * 100 }
+  const delta = max - min
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min)
+  let hue = 0
+  if (max === red) hue = (green - blue) / delta + (green < blue ? 6 : 0)
+  else if (max === green) hue = (blue - red) / delta + 2
+  else hue = (red - green) / delta + 4
+  return { h: (hue * 60) % 360, s: saturation * 100, l: lightness * 100 }
+}
+
+function hslToRgb({ h, s, l }: Hsl): Rgb {
+  const hue = ((h % 360) + 360) % 360
+  const saturation = s / 100
+  const lightness = l / 100
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const match = lightness - chroma / 2
+  const [r, g, b] = hue < 60 ? [chroma, second, 0]
+    : hue < 120 ? [second, chroma, 0]
+      : hue < 180 ? [0, chroma, second]
+        : hue < 240 ? [0, second, chroma]
+          : hue < 300 ? [second, 0, chroma]
+            : [chroma, 0, second]
+  return { r: (r + match) * 255, g: (g + match) * 255, b: (b + match) * 255 }
+}
+
+/**
+ * Selector de color propio.
+ *
+ * Área de saturación y valor, tira de tono y campo hexadecimal: el mismo
+ * control que usan las herramientas de diseño, dibujado con los tokens de la
+ * aplicación en vez del cuadro nativo del sistema.
+ */
+function ColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+  const current = hexToRgb(value) ?? hexToRgb(COLOR_PRESETS[0].seed)!
+  const [hue, setHue] = useState(rgbToHsl(current).h)
+  const [saturation, setSaturation] = useState(rgbToHsl(current).s)
+  const [lightness, setLightness] = useState(rgbToHsl(current).l)
+
+  useEffect(() => {
+    const hsl = rgbToHsl(hexToRgb(value) ?? current)
+    setHue(hsl.h)
+    setSaturation(hsl.s)
+    setLightness(hsl.l)
+    // Solo cuando cambia el color desde fuera: el selector es la fuente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+
+  const preview = rgbToHex(hslToRgb({ h: hue, s: saturation, l: lightness }))
+
+  const commit = (next: Hsl) => {
+    setHue(next.h)
+    setSaturation(next.s)
+    setLightness(next.l)
+    onChange(rgbToHex(hslToRgb(next)))
+  }
+
+  const pickArea = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = clamp01((event.clientX - rect.left) / rect.width)
+    const y = clamp01((event.clientY - rect.top) / rect.height)
+    commit({ h: hue, s: x * 100, l: (1 - y) * 100 })
+  }
+
+  const pickHue = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = clamp01((event.clientX - rect.left) / rect.width)
+    commit({ h: x * 360, s: saturation, l: lightness })
+  }
+
+  return (
+    <div className="cf-picker">
+      <div
+        className="cf-picker__area"
+        style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${hue} 100% 50%)` }}
+        role="application"
+        aria-label=" Saturación y brillo del color"
+        onPointerDown={pickArea}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const x = clamp01((event.clientX - rect.left) / rect.width)
+          const y = clamp01((event.clientY - rect.top) / rect.height)
+          commit({ h: hue, s: x * 100, l: (1 - y) * 100 })
+        }}
+      >
+        <span className="cf-picker__cursor" style={{ left: `${saturation}%`, top: `${100 - lightness}%` }} />
+      </div>
+      <div
+        className="cf-picker__hue"
+        role="application"
+        aria-label="Tono del color"
+        onPointerDown={pickHue}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          const x = clamp01((event.clientX - rect.left) / rect.width)
+          commit({ h: x * 360, s: saturation, l: lightness })
+        }}
+      >
+        <span className="cf-picker__cursor" style={{ left: `${(hue / 360) * 100}%` }} />
+      </div>
+      <div className="cf-picker__row">
+        <span className="cf-picker__preview" style={{ background: preview }} aria-hidden="true" />
+        <input
+          className="cf-field__input cf-field__input--code"
+          value={preview.toUpperCase()}
+          spellCheck={false}
+          aria-label="Color hexadecimal"
+          onChange={(event) => {
+            const next = event.target.value.trim()
+            if (!/^#?[\da-f]{6}$/i.test(next)) return
+            onChange(next.startsWith('#') ? next.toLowerCase() : `#${next.toLowerCase()}`)
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+interface AppearancePanelProps {
   mode: ColorMode
   seed: string
   isDark: boolean
   onModeChange: (mode: ColorMode) => void
   onSeedChange: (seed: string) => void
+  /** Devuelve el layout a su estado inicial. */
+  onResetLayout: () => void
 }
 
 /**
- * Botón de apariencia: un solo control para el tema y la paleta, en lugar de
- * un selector, cuatro muestras y un campo de color sueltos en la barra.
+ * Panel de apariencia: tema, paleta y color propio.
+ *
+ * Es un panel propio y no un menú: el selector de color necesita puntero
+ * libre sobre su área, algo que un menú modal no permite.
  */
-export function AppearanceMenu({ mode, seed, isDark, onModeChange, onSeedChange }: AppearanceMenuProps) {
+export function AppearancePanel({
+  mode,
+  seed,
+  isDark,
+  onModeChange,
+  onSeedChange,
+  onResetLayout,
+}: AppearancePanelProps) {
+  const [open, setOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
   return (
-    <Menu>
-      <MenuTrigger
-        render={<Button variant="ghost" size="icon-sm" />}
-        className="cf-icon-button"
+    <div className="cf-appearance" ref={rootRef}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className={`cf-icon-button ${open ? 'is-active' : ''}`}
         aria-label="Apariencia: tema y paleta"
         title="Apariencia"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
       >
         <APP_ICONS.appearance aria-hidden="true" />
-      </MenuTrigger>
-      <MenuContent align="end" className="cf-menu--appearance">
-        <MenuRadioGroup value={mode} onValueChange={(value) => onModeChange(value as ColorMode)}>
-          <MenuGroupLabel>Tema</MenuGroupLabel>
-          <MenuRadioItem value="system" icon={APP_ICONS.appearanceSystem}>Automático</MenuRadioItem>
-          <MenuRadioItem value="light" icon={APP_ICONS.appearanceLight}>Claro</MenuRadioItem>
-          <MenuRadioItem value="dark" icon={APP_ICONS.appearanceDark}>Oscuro</MenuRadioItem>
-        </MenuRadioGroup>
-        <MenuSeparator />
-        <MenuRadioGroup value={seed} onValueChange={(value) => onSeedChange(String(value))}>
-          <MenuGroupLabel>Paleta</MenuGroupLabel>
-          {COLOR_PRESETS.map((preset) => (
-            <MenuSwatchItem key={preset.seed} value={preset.seed} swatch={accentFor(preset.seed, isDark)}>
-              {preset.name}
-            </MenuSwatchItem>
-          ))}
-          <label className="cf-menu__item cf-menu__item--color">
-            <input
-              type="color"
-              value={seed}
-              onChange={(event) => onSeedChange(event.target.value)}
-              aria-label="Color de origen personalizado"
-            />
-            <span className="cf-menu__label">Color personalizado…</span>
-          </label>
-        </MenuRadioGroup>
-      </MenuContent>
-    </Menu>
+      </Button>
+
+      {open && (
+        <div className="cf-appearance__panel" role="dialog" aria-label="Apariencia">
+          <div className="cf-appearance__group">
+            <span className="cf-appearance__label">Tema</span>
+            <div className="cf-segmented" role="radiogroup" aria-label="Tema de la aplicación">
+              {MODES.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === option.id}
+                  className={mode === option.id ? 'is-active' : ''}
+                  onClick={() => onModeChange(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="cf-appearance__group">
+            <span className="cf-appearance__label">Paleta</span>
+            <div className="cf-appearance__swatches">
+              {COLOR_PRESETS.map((preset) => (
+                <button
+                  key={preset.seed}
+                  type="button"
+                  className={`cf-swatch ${seed === preset.seed ? 'is-active' : ''}`}
+                  aria-label={preset.name}
+                  aria-pressed={seed === preset.seed}
+                  title={preset.name}
+                  onClick={() => onSeedChange(preset.seed)}
+                >
+                  <span style={{ background: accentFor(preset.seed, isDark) }} />
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`cf-swatch cf-swatch--custom ${pickerOpen ? 'is-active' : ''}`}
+                aria-label="Color personalizado"
+                aria-expanded={pickerOpen}
+                title="Color personalizado"
+                onClick={() => setPickerOpen((current) => !current)}
+              >
+                <APP_ICONS.appearance aria-hidden="true" />
+              </button>
+            </div>
+            {pickerOpen && <ColorPicker value={seed} onChange={onSeedChange} />}
+          </div>
+
+          <div className="cf-appearance__group cf-appearance__group--last">
+            <Button variant="ghost" size="sm" className="cf-appearance__reset" onClick={onResetLayout}>
+              <APP_ICONS.layout aria-hidden="true" />
+              Restablecer el layout
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

@@ -130,8 +130,6 @@ export function ResizeHandle({ orientation, onResize, onNudge, onCommit, label }
       onPointerCancel={stopDragging}
       onKeyDown={handleKeyDown}
       onDoubleClick={() => { onNudge?.(0); onCommit?.() }}
-    >
-      <span className="cf-resizer__grip" aria-hidden="true" />
-    </div>
+    ></div>
   )
 }

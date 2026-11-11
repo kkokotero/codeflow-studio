@@ -21,6 +21,8 @@ interface ConsolePanelProps {
   status: RunStatus
   /** Resultado de la última ejecución, siempre visible en el cuerpo. */
   runNotice: string
+  /** Cierra la consola por completo; su icono queda en la barra. */
+  onClose?: () => void
   collapsed: boolean
   height?: number
   onToggleCollapsed: () => void
@@ -40,6 +42,7 @@ export function ConsolePanel({
   logs,
   status,
   runNotice,
+  onClose,
   collapsed,
   height,
   onToggleCollapsed,
@@ -101,6 +104,17 @@ export function ConsolePanel({
           >
             <APP_ICONS.delete aria-hidden="true" />
           </Button>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Cerrar la consola"
+              title="Cerrar la consola"
+              onClick={onClose}
+            >
+              <APP_ICONS.close aria-hidden="true" />
+            </Button>
+          )}
         </div>
       </header>
       {!collapsed && (
