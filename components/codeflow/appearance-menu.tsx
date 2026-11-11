@@ -7,6 +7,7 @@ import {
   Hct,
   SchemeExpressive,
 } from '@material/material-color-utilities'
+import type { LucideIcon } from 'lucide-react'
 
 import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { Button } from '@/components/ui/button'
@@ -26,10 +27,10 @@ export const COLOR_PRESETS = [
 
 const MODE_STORAGE_KEY = 'codeflow-appearance-v1'
 
-const MODES: Array<{ id: ColorMode; label: string }> = [
-  { id: 'system', label: 'Automático' },
-  { id: 'light', label: 'Claro' },
-  { id: 'dark', label: 'Oscuro' },
+const MODES: Array<{ id: ColorMode; label: string; icon: LucideIcon }> = [
+  { id: 'system', label: 'Automático', icon: APP_ICONS.appearanceSystem },
+  { id: 'light', label: 'Claro', icon: APP_ICONS.appearanceLight },
+  { id: 'dark', label: 'Oscuro', icon: APP_ICONS.appearanceDark },
 ]
 
 function setColorToken(name: string, value: number) {
@@ -402,18 +403,22 @@ export function AppearancePanel({
           <div className="cf-appearance__group">
             <span className="cf-appearance__label">Tema</span>
             <div className="cf-segmented" role="radiogroup" aria-label="Tema de la aplicación">
-              {MODES.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={mode === option.id}
-                  className={mode === option.id ? 'is-active' : ''}
-                  onClick={() => onModeChange(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
+              {MODES.map((option) => {
+                const Icon = option.icon
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === option.id}
+                    className={mode === option.id ? 'is-active' : ''}
+                    onClick={() => onModeChange(option.id)}
+                  >
+                    <Icon aria-hidden="true" />
+                    {option.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 

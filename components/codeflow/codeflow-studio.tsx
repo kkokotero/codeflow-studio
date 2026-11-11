@@ -1168,6 +1168,19 @@ export function CodeflowStudio() {
               </>
             )}
 
+            {activeProject && view !== 'studio' && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="cf-icon-button cf-icon-button--project"
+                aria-label={`Volver a ${activeProject.name}`}
+                title={`Volver a ${activeProject.name}`}
+                onClick={() => openProject(activeProject.id)}
+              >
+                <APP_ICONS.folder aria-hidden="true" />
+              </Button>
+            )}
+
             <AppearancePanel
               mode={mode}
               seed={seed}
@@ -1274,15 +1287,6 @@ export function CodeflowStudio() {
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => setSectionClosed('files', true)}
-                        aria-label="Cerrar el explorador"
-                        title="Cerrar el explorador"
-                      >
-                        <APP_ICONS.close aria-hidden="true" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
                         onClick={() => setDialog({ kind: 'new-folder', parentId: null })}
                         aria-label="Nueva carpeta"
                         title="Nueva carpeta"
@@ -1299,6 +1303,15 @@ export function CodeflowStudio() {
                         disabled={isRuntimeBusy}
                       >
                         <APP_ICONS.newFile aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('files', true)}
+                        aria-label="Cerrar el explorador"
+                        title="Cerrar el explorador"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
                       </Button>
                     </div>
                   </div>
@@ -1373,15 +1386,6 @@ export function CodeflowStudio() {
                       {historicalView && <span className="cf-chip cf-chip--warning">Solo lectura</span>}
                     </div>
                     <div className="cf-pane-header__actions">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => setSectionClosed('editor', true)}
-                        aria-label="Cerrar el editor"
-                        title="Cerrar el editor"
-                      >
-                        <APP_ICONS.close aria-hidden="true" />
-                      </Button>
                       {historicalView ? (
                         <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button>
                       ) : (
@@ -1417,6 +1421,15 @@ export function CodeflowStudio() {
                           </MenuContent>
                         </Menu>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('editor', true)}
+                        aria-label="Cerrar el editor"
+                        title="Cerrar el editor"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
+                      </Button>
                     </div>
                   </div>
                   <div className="cf-editor__surface">
@@ -1477,15 +1490,6 @@ export function CodeflowStudio() {
                       <span className="cf-count">{graph.nodes.length} nodos</span>
                     </div>
                     <div className="cf-pane-header__actions">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => setSectionClosed('diagram', true)}
-                        aria-label="Cerrar el diagrama"
-                        title="Cerrar el diagrama"
-                      >
-                        <APP_ICONS.close aria-hidden="true" />
-                      </Button>
                       <Menu>
                         <MenuTrigger
                           render={<Button variant="ghost" size="icon-xs" />}
@@ -1502,6 +1506,15 @@ export function CodeflowStudio() {
                           </MenuItem>
                         </MenuContent>
                       </Menu>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setSectionClosed('diagram', true)}
+                        aria-label="Cerrar el diagrama"
+                        title="Cerrar el diagrama"
+                      >
+                        <APP_ICONS.close aria-hidden="true" />
+                      </Button>
                     </div>
                   </div>
                   <div className="cf-diagram__surface">
@@ -1668,26 +1681,6 @@ export function CodeflowStudio() {
                 <APP_ICONS.inspector aria-hidden="true" />Inspector
               </button>
             </nav>
-
-            <footer className="cf-statusbar">
-              <span className="cf-statusbar__status">
-                <span className={`cf-status-dot cf-status-dot--${status}`} aria-hidden="true" />
-                {status === 'loading' || status === 'running'
-                  ? 'Ejecutando en microVM'
-                  : status === 'error'
-                    ? 'Error de ejecución'
-                    : status === 'stopped'
-                      ? 'Ejecución detenida'
-                      : status === 'complete'
-                        ? 'Ejecución completada'
-                        : 'Runtime aislado'}
-              </span>
-              <span className="cf-statusbar__right">
-                {LANGUAGE_DEFINITIONS[displayLanguage].analyzerName}
-                <span aria-hidden="true">·</span>
-                {graph.nodes.length} símbolos de flujo
-              </span>
-            </footer>
           </>
         ) : view === 'home' ? (
           <HomeView

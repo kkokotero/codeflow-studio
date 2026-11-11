@@ -160,7 +160,7 @@
 
 .cf-app {
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) 12px auto 24px;
+  grid-template-rows: 44px minmax(0, 1fr) 12px auto;
   width: 100%;
   height: 100dvh;
   min-height: 560px;
@@ -185,8 +185,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  gap: 8px;
-  padding: 8px 8px 0;
+  gap: 4px;
+  padding: 6px 6px 0;
   background: var(--cf-surface-app);
 }
 
@@ -221,10 +221,14 @@
   width: var(--cf-w-inspector, 268px);
 }
 
-/* Separador redimensionable: una línea fina que se ensancha al arrastrarla. */
+/*
+ * Separador redimensionable: un tirador corto y redondeado, no una línea
+ * completa. En reposo es discreto; al apuntarlo o arrastrarlo crece y se
+ * tiñe de acento para marcar el gesto.
+ */
 .cf-resizer {
   position: relative;
-  flex: 0 0 12px;
+  flex: 0 0 10px;
   z-index: 3;
   touch-action: none;
   outline: none;
@@ -235,44 +239,44 @@
 .cf-resizer--horizontal {
   flex: none;
   width: 100%;
-  height: 12px;
+  height: 10px;
   cursor: row-resize;
 }
 
 .cf-resizer::before {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 50%;
   left: 50%;
-  width: 1px;
-  background: var(--cf-line);
+  width: 3px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--cf-line-strong);
   content: '';
-  transform: translateX(-50%);
-  transition: width 140ms var(--cf-motion), background 140ms var(--cf-motion);
+  opacity: 0.45;
+  transform: translate(-50%, -50%);
+  transition:
+    height 240ms var(--cf-motion-emphasized),
+    width 240ms var(--cf-motion-emphasized),
+    background 180ms var(--cf-motion),
+    opacity 180ms var(--cf-motion);
 }
 
-.cf-resizer--horizontal::before {
-  top: 50%;
-  right: 0;
-  bottom: auto;
-  left: 0;
-  width: auto;
-  height: 1px;
-  transform: translateY(-50%);
-}
+.cf-resizer--horizontal::before { width: 26px; height: 3px; }
 
 .cf-resizer:hover::before,
 .cf-resizer.is-dragging::before,
 .cf-resizer:focus-visible::before {
-  width: 3px;
+  width: 4px;
+  height: 56px;
   background: var(--cf-accent);
+  opacity: 1;
 }
 
 .cf-resizer--horizontal:hover::before,
 .cf-resizer--horizontal.is-dragging::before,
 .cf-resizer--horizontal:focus-visible::before {
-  width: auto;
-  height: 3px;
+  width: 56px;
+  height: 4px;
 }
 
 .cf-panel {
@@ -489,6 +493,10 @@
 }
 
 .cf-segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 26px;
   padding: 0 8px;
   border: 0;
@@ -501,8 +509,10 @@
   transition: background 180ms var(--cf-motion), color 180ms var(--cf-motion), border-radius 220ms var(--cf-motion-emphasized);
 }
 
+.cf-segmented button svg { width: 13px; height: 13px; flex: 0 0 13px; }
 .cf-segmented button:hover { color: var(--cf-text); }
 .cf-segmented button.is-active { border-radius: 6px; background: var(--cf-surface-raised); color: var(--cf-text); box-shadow: var(--cf-shadow-soft); }
+.cf-segmented button.is-active svg { color: var(--cf-accent); }
 
 /* Muestras de la paleta. */
 .cf-appearance__swatches { display: flex; align-items: center; gap: 8px; }
@@ -595,6 +605,10 @@
 .cf-toolbar__sections { display: flex; align-items: center; gap: 2px; margin-right: 2px; }
 .cf-icon-button--section { color: var(--cf-text-subtle); }
 .cf-icon-button--section:hover { color: var(--cf-accent); background: var(--cf-surface-hover); }
+
+/* Volver al proyecto activo desde cualquier vista. */
+.cf-icon-button--project { color: var(--cf-accent); }
+.cf-icon-button--project:hover { background: color-mix(in srgb, var(--cf-accent) 14%, transparent); }
 
 /* --------------------------------------------------------------------- */
 /* Menús                                                                  */
@@ -1850,7 +1864,7 @@
   flex-direction: column;
   min-height: 0;
   height: 158px;
-  margin: 0 8px 6px;
+  margin: 0 6px 6px;
   overflow: hidden;
   border: 1px solid var(--cf-line);
   border-radius: var(--cf-radius-card);
@@ -1930,23 +1944,8 @@
 }
 
 /* --------------------------------------------------------------------- */
-/* Barra de estado y navegación móvil                                    */
+/* Navegación móvil                                                      */
 /* --------------------------------------------------------------------- */
-
-.cf-statusbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 0 12px;
-  border-top: 1px solid var(--cf-line);
-  background: var(--cf-surface-raised);
-  color: var(--cf-text-subtle);
-  font: 10.5px/1.4 var(--cf-font-mono);
-}
-
-.cf-statusbar__status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.cf-statusbar__right { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 
 .cf-mobile-nav {
   display: none;
@@ -2367,11 +2366,11 @@
 }
 
 @media (max-width: 1180px) {
-  .cf-app { grid-template-rows: 44px minmax(0, 1fr) 12px auto 46px 24px; }
+  .cf-app { grid-template-rows: 44px minmax(0, 1fr) 12px auto 46px; }
   .cf-run-button { width: 30px; padding-inline: 0; }
   .cf-run-button__label { display: none; }
   .cf-workspace { position: relative; display: block; }
-  .cf-files, .cf-panel { position: absolute; inset: 8px 8px 0; display: none; }
+  .cf-files, .cf-panel { position: absolute; inset: 6px 6px 0; display: none; }
   .cf-files.is-mobile-active, .cf-panel.is-mobile-active { display: flex; }
   .cf-mobile-nav { display: grid; }
   .cf-brand__name { display: none; }
@@ -2433,7 +2432,7 @@
 }
 
 @media (max-width: 640px) {
-  .cf-app { grid-template-rows: 44px minmax(0, 1fr) 12px auto 46px 22px; }
+  .cf-app { grid-template-rows: 44px minmax(0, 1fr) 12px auto 46px; }
   .cf-project-trigger__name { display: none; }
   .cf-project-trigger { max-width: 34px; padding-inline: 0; justify-content: center; }
   .cf-app--page { grid-template-rows: 44px minmax(0, 1fr); }
@@ -2441,7 +2440,6 @@
   .cf-divider { display: none; }
   .cf-project-trigger { max-width: 120px; }
   .cf-console { height: 132px; }
-  .cf-statusbar__right { display: none; }
   .cf-achievement-grid { grid-template-columns: 1fr; }
   .cf-achievements h1 { font-size: 25px; }
   .cf-achievements__completion { min-width: 0; }
