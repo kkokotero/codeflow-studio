@@ -135,8 +135,8 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
           animated: false,
-          style: { stroke: '#7a8b82' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#7a8b82' },
+          style: { stroke: 'var(--cf-text-muted)' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--cf-text-muted)' },
           data: { role: 'control' },
       }]
       onConnectNodes(next.filter((edge) => edge.id.startsWith('edge-user-')).length)
@@ -170,9 +170,9 @@ export const FlowCanvas = memo(function FlowCanvas({ graph, manualEdges, activeL
           nodesDraggable
         >
           <AutoFit nodeKey={layoutKey} />
-          <Background color="#26302d" gap={20} size={1} />
+          <Background color="var(--cf-line)" gap={20} size={1} />
           <Controls position="bottom-left" showInteractive={false} />
-          <MiniMap position="top-right" style={{ width: 118, height: 82 }} nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, #72807b)`} maskColor="rgba(7, 10, 13, 0.72)" />
+          <MiniMap position="top-right" style={{ width: 118, height: 82 }} nodeColor={(node) => `var(--node-${(node.data as FlowCardData).kind}, var(--cf-text-subtle))`} maskColor="rgb(0 0 0 / 28%)" />
         </ReactFlow>
       )}
     </div>

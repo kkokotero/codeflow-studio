@@ -1,5 +1,7 @@
 import { it } from 'vitest'
 import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { analyzeCode } from './lib/diagram'
 import { starterFiles } from './lib/codeflow-examples'
 import { routeFlowEdges, getFlowNodeSize } from './lib/flow-routing'
@@ -43,5 +45,5 @@ it('screenshot', () => {
   const rerouted = routeFlowEdges(moved, graph.edges)
   const byId = new Map(moved.map((n) => [n.id, n]))
   const log = rerouted.map((e) => `${e.id} ${e.data?.role} ${byId.get(e.source)?.data.label.slice(0, 16)} -> ${byId.get(e.target)?.data.label.slice(0, 16)} len ${length(e)} hits ${nodeCrossings(moved, e).join(',')} pts ${JSON.stringify(e.data?.routePoints)}`)
-  writeFileSync('/tmp/opencode/screenshot.txt', log.join('\n'))
+  writeFileSync(join(tmpdir(), 'codeflow-routing-scratch.txt'), log.join('\n'))
 })

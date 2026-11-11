@@ -109,7 +109,7 @@ export type AchievementActivity =
   | { type: 'run-failure' }
   | { type: 'run-success'; language: Language; output: string; nodeCount: number; nodeKinds: string[]; code?: string }
   | { type: 'explore'; feature: 'diagram' | 'file' | 'import' | 'language' | 'help' }
-  | { type: 'inspector'; tab: 'variables' | 'stack' | 'history' }
+  | { type: 'inspector'; tab: 'symbols' | 'history' }
   | { type: 'snapshot' }
   | { type: 'export'; target: 'file' | 'project' | 'diagram' }
   | { type: 'apply-edit' }
@@ -612,11 +612,11 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   ...snapshotTiers,
   ...consoleClearTiers,
   ...exportTiers,
-  counter({ id: 'export-file-1', name: 'Archivo compartido', description: 'Exporta el archivo activo.', hint: 'Usa el botón de descarga del archivo en la barra superior.', condition: 'Exportar un archivo de código.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Download' }, (stats) => stats.fileExports, 1),
-  counter({ id: 'export-project-1', name: 'Proyecto entregado', description: 'Exporta el proyecto completo.', hint: 'Usa el botón de exportar proyecto CodeFlow.', condition: 'Exportar un proyecto CodeFlow.', category: 'Exploración', difficulty: 'Fácil', xp: 20, icon: 'FolderOpen' }, (stats) => stats.projectExports, 1),
-  counter({ id: 'export-diagram-1', name: 'Diagrama exportado', description: 'Exporta el diagrama del flujo actual.', hint: 'Usa el botón de exportar diagrama JSON.', condition: 'Exportar un diagrama de flujo.', category: 'Exploración', difficulty: 'Fácil', xp: 20, icon: 'GitCommitHorizontal' }, (stats) => stats.diagramExports, 1),
+  counter({ id: 'export-file-1', name: 'Archivo compartido', description: 'Exporta el archivo activo.', hint: 'Abre el menú «Más acciones» de la barra superior y elige Exportar archivo.', condition: 'Exportar un archivo de código.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Download' }, (stats) => stats.fileExports, 1),
+  counter({ id: 'export-project-1', name: 'Proyecto entregado', description: 'Exporta el proyecto completo.', hint: 'Abre el menú del proyecto y elige Exportar proyecto.', condition: 'Exportar un proyecto CodeFlow.', category: 'Exploración', difficulty: 'Fácil', xp: 20, icon: 'FolderOpen' }, (stats) => stats.projectExports, 1),
+  counter({ id: 'export-diagram-1', name: 'Diagrama exportado', description: 'Exporta el diagrama del flujo actual.', hint: 'Abre el menú «Más acciones» del panel Flujo y elige Exportar diagrama.', condition: 'Exportar un diagrama de flujo.', category: 'Exploración', difficulty: 'Fácil', xp: 20, icon: 'GitCommitHorizontal' }, (stats) => stats.diagramExports, 1),
   flag({ id: 'help-opened', name: 'Curioso', description: 'Abre la ayuda y los atajos de teclado.', hint: 'Pulsa el icono de teclado en la barra superior.', condition: 'Abrir el diálogo de ayuda.', category: 'Exploración', difficulty: 'Fácil', xp: 15, icon: 'Lightbulb' }, (stats) => stats.helpOpened),
-  counter({ id: 'inspector-tabs-3', name: 'Inspector completo', description: 'Visita las tres pestañas del inspector.', hint: 'Revisa Estado, Pila e Historial en el panel derecho.', condition: 'Abrir las pestañas de estado, pila e historial.', category: 'Exploración', difficulty: 'Intermedio', xp: 25, icon: 'ScanSearch' }, (stats) => stats.inspectorTabsUsed.length, 3),
+  counter({ id: 'inspector-tabs-2', name: 'Inspector completo', description: 'Visita las dos pestañas del inspector.', hint: 'Revisa Símbolos e Historial en el panel derecho.', condition: 'Abrir las pestañas de símbolos e historial.', category: 'Exploración', difficulty: 'Intermedio', xp: 25, icon: 'ScanSearch' }, (stats) => stats.inspectorTabsUsed.length, 2),
 
   counter({ id: 'steady', name: 'Constancia', description: 'Completa tres ejecuciones correctas seguidas.', hint: 'Cada ejecución correcta consecutiva suma; un error reinicia la racha.', condition: 'Completar 3 ejecuciones correctas consecutivas.', category: 'Constancia', difficulty: 'Intermedio', xp: 45, icon: 'Flame' }, (stats) => stats.consecutiveSuccessfulRuns, 3),
   ...streakTiers,

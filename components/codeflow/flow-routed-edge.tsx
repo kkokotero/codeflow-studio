@@ -17,7 +17,7 @@ export function FlowRoutedEdge({ id, sourceX, sourceY, targetX, targetY, markerE
   }, { start: points[0], end: points[0], length: 0 })
   const labelX = (labelSegment.start.x + labelSegment.end.x) / 2
   const labelY = (labelSegment.start.y + labelSegment.end.y) / 2
-  const color = typeof style?.stroke === 'string' ? style.stroke : '#82918a'
+  const color = typeof style?.stroke === 'string' ? style.stroke : 'var(--cf-text-subtle)'
   const labelColor = typeof labelStyle?.fill === 'string' ? labelStyle.fill : color
 
   return (
@@ -30,7 +30,7 @@ export function FlowRoutedEdge({ id, sourceX, sourceY, targetX, targetY, markerE
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               color: labelColor,
-              background: typeof labelBgStyle?.fill === 'string' ? labelBgStyle.fill : '#121a18',
+              background: typeof labelBgStyle?.fill === 'string' ? labelBgStyle.fill : 'var(--cf-surface-raised)',
               pointerEvents: 'none',
             }}
           >

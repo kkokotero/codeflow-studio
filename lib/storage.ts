@@ -237,6 +237,7 @@ export function createFile(
   name: string,
   language: Language,
   code: string,
+  templateId?: string,
 ): StorageState {
   const index = findProjectIndex(state, projectId)
   if (index < 0) return state
@@ -249,6 +250,7 @@ export function createFile(
     code,
     folderId,
     updatedAt: now,
+    ...(templateId ? { templateId } : {}),
   }
   const nextProject: Project = {
     ...project,
@@ -302,6 +304,38 @@ export function renameFile(
   if (fileIndex < 0) return state
   const now = Date.now()
   const file = { ...project.files[fileIndex], name, updatedAt: now }
+  const nextProject: Project = {
+    ...project,
+    files: [...project.files.slice(0, fileIndex), file, ...project.files.slice(fileIndex + 1)],
+    updatedAt: now,
+  }
+  const nextProjects = [...state.projects]
+  nextProjects[index] = nextProject
+  return { ...state, projects: nextProjects }
+}
+
+/**
+ * Actualiza los metadatos de un archivo (nombre y lenguaje) sin tocar su código.
+ */
+export function updateFileMeta(
+  state: StorageState,
+  projectId: string,
+  fileId: string,
+  patch: { name?: string; language?: Language },
+): StorageState {
+  const index = findProjectIndex(state, projectId)
+  if (index < 0) return state
+  const project = state.projects[index]
+  const fileIndex = findFileIndex(project, fileId)
+  if (fileIndex < 0) return state
+  const now = Date.now()
+  const current = project.files[fileIndex]
+  const file: CodeFile = {
+    ...current,
+    name: patch.name ?? current.name,
+    language: patch.language ?? current.language,
+    updatedAt: now,
+  }
   const nextProject: Project = {
     ...project,
     files: [...project.files.slice(0, fileIndex), file, ...project.files.slice(fileIndex + 1)],

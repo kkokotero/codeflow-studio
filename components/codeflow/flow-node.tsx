@@ -2,68 +2,14 @@
 
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { ArrowLeftRight, Braces, Circle, GitBranch, Layers3, Play, Repeat2, Variable, CornerDownRight, Box, Activity } from 'lucide-react'
-import type { FlowCardNode, NodeKind, OperationCategory } from '@/lib/codeflow-types'
 
-const iconByKind = {
-  function: Braces,
-  variable: Variable,
-  object: Box,
-  event: Activity,
-  condition: GitBranch,
-  loop: Repeat2,
-  class: Layers3,
-  call: Play,
-  return: CornerDownRight,
-  import: Box,
-  statement: Box,
-  operation: Braces,
-  phase: GitBranch,
-  start: Play,
-  end: Circle,
-  connector: Circle,
-  io: ArrowLeftRight,
-} as const
-
-const kindLabels: Record<NodeKind, string> = {
-  function: 'función',
-  variable: 'variable',
-  object: 'objeto',
-  event: 'evento',
-  condition: 'condición',
-  loop: 'bucle',
-  class: 'clase',
-  call: 'llamada',
-  return: 'retorno',
-  import: 'importación',
-  statement: 'instrucción',
-  operation: 'operación',
-  phase: 'fase de flujo',
-  start: 'inicio',
-  end: 'fin',
-  connector: 'conector',
-  io: 'entrada / salida',
-}
-
-const operationLabels: Record<OperationCategory, string> = {
-  read: 'lectura',
-  write: 'escritura',
-  literal: 'literal',
-  arithmetic: 'aritmética',
-  comparison: 'comparación',
-  logical: 'lógica',
-  assignment: 'asignación',
-  call: 'llamada',
-  access: 'acceso',
-  collection: 'colección',
-  conditional: 'condicional',
-  unary: 'unaria',
-  template: 'plantilla',
-}
+import { NODE_ICONS } from '@/components/codeflow/app-icons'
+import { NODE_LABELS, OPERATION_LABELS } from '@/components/codeflow/node-kinds'
+import type { FlowCardNode } from '@/lib/codeflow-types'
 
 export const FlowNode = memo(function FlowNode({ data, selected }: NodeProps<FlowCardNode>) {
-  const Icon = iconByKind[data.kind]
-  const typeLabel = data.kind === 'operation' && data.operationCategory ? operationLabels[data.operationCategory] : kindLabels[data.kind]
+  const Icon = NODE_ICONS[data.kind]
+  const typeLabel = data.kind === 'operation' && data.operationCategory ? OPERATION_LABELS[data.operationCategory] : NODE_LABELS[data.kind]
   const shape = data.shape ?? (data.kind === 'condition' || data.kind === 'loop' ? 'decision' : data.kind === 'start' || data.kind === 'end' || data.kind === 'return' ? 'terminator' : data.kind === 'io' ? 'input-output' : data.kind === 'connector' ? 'connector' : 'process')
   const lineLabel = data.lineEnd && data.lineEnd > data.line ? `L${data.line}–${data.lineEnd}` : `L${data.line}`
   return (

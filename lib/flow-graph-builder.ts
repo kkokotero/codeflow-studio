@@ -27,19 +27,23 @@ export interface FlowNodeInput {
   [key: string]: unknown
 }
 
+/**
+ * Color de cada tipo de flecha. Usa variables CSS para que las flechas sigan
+ * a la paleta activa en lugar de fijar tonos que se contradicen con el tema.
+ */
 const edgeColors: Record<FlowEdgeRole, string> = {
-  control: '#64736b',
-  data: '#72b8ca',
-  true: '#75c797',
-  false: '#e39a88',
-  repeat: '#b49be8',
-  exit: '#d7b773',
-  body: '#88958d',
-  operand: '#72b8ca',
-  case: '#dfbd73',
-  exception: '#e1847f',
-  merge: '#82918a',
-  unreachable: '#718079',
+  control: 'var(--cf-text-muted)',
+  data: 'var(--node-variable)',
+  true: 'var(--cf-accent)',
+  false: 'var(--cf-danger)',
+  repeat: 'var(--node-loop)',
+  exit: 'var(--node-phase)',
+  body: 'var(--cf-text-subtle)',
+  operand: 'var(--node-operation)',
+  case: 'var(--node-phase)',
+  exception: 'var(--cf-danger)',
+  merge: 'var(--cf-text-subtle)',
+  unreachable: 'var(--cf-line-strong)',
 }
 
 export function emptyFlowFragment(): FlowFragment {
@@ -118,7 +122,7 @@ export class FlowGraphBuilder {
       markerEnd: { type: 'arrowclosed', color: edgeColors[role] },
       label,
       labelStyle: { fill: edgeColors[role], fontSize: 10 },
-      labelBgStyle: { fill: '#121a18', fillOpacity: 0.96, stroke: 'none' },
+      labelBgStyle: { fill: 'var(--cf-surface-raised)', fillOpacity: 0.96, stroke: 'none' },
       labelBgPadding: [4, 3],
       labelBgBorderRadius: 3,
     })

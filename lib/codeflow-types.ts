@@ -7,7 +7,6 @@ export type FlowShape = 'terminator' | 'process' | 'decision' | 'input-output' |
 export type OperationCategory = 'read' | 'write' | 'literal' | 'arithmetic' | 'comparison' | 'logical' | 'assignment' | 'call' | 'access' | 'collection' | 'conditional' | 'unary' | 'template'
 export type FlowEdgeRole = 'control' | 'data' | 'true' | 'false' | 'repeat' | 'exit' | 'body' | 'operand' | 'case' | 'exception' | 'merge' | 'unreachable'
 export type RunStatus = 'idle' | 'loading' | 'running' | 'paused' | 'complete' | 'stopped' | 'error'
-export type SafeValue = null | boolean | number | string | SafeValue[] | { [key: string]: SafeValue }
 
 export interface CodeFile {
   id: string
@@ -18,17 +17,8 @@ export interface CodeFile {
   folderId?: string | null
   /** Marca de tiempo de la última modificación del código. */
   updatedAt?: number
-}
-
-export interface TraceEntry {
-  id: number
-  line: number
-  locals: Record<string, SafeValue>
-  stack: string[]
-  returnValue?: SafeValue
-  operationId?: string
-  operationValue?: SafeValue
-  output?: string
+  /** Plantilla de origen (ejemplo incluido) para poder restaurar el contenido. */
+  templateId?: string
 }
 
 export interface FlowCardData extends Record<string, unknown> {
@@ -82,18 +72,5 @@ export interface RunSnapshot {
   language: Language
   code: string
   createdAt: number
-  steps: TraceEntry[]
   output: ExecutionOutput[]
-}
-
-export interface RuntimeMessage {
-  type: 'ready' | 'step' | 'operation' | 'console' | 'done' | 'error'
-  line?: number
-  locals?: Record<string, SafeValue>
-  stack?: string[]
-  value?: string
-  returnValue?: SafeValue
-  operationId?: string
-  operationValue?: SafeValue
-  error?: string
 }

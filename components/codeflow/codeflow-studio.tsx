@@ -2,92 +2,162 @@
 
 import dynamic from 'next/dynamic'
 import type { OnMount } from '@monaco-editor/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Braces, Check,
-  ChevronDown, CircleDot, Clock3, Code2, Copy, FileCode2, FilePlus2, Folder,
-  GitBranch, History, Import, Keyboard, ListTree, LoaderCircle, PanelRight,
-  Play, Plus, RotateCcw, Search, SkipBack, SkipForward, SlidersHorizontal, Trophy,
-  Square, Terminal, Trash2, Variable, X,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { FlowCanvas } from '@/components/codeflow/flow-canvas'
-import { ColorThemeControls, useMaterialTheme } from '@/components/codeflow/color-theme-controls'
-import { HelpDialog } from '@/components/codeflow/help-dialog'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { LoaderCircle, Search, X } from 'lucide-react'
+
+import { APP_ICONS, NODE_ICONS } from '@/components/codeflow/app-icons'
 import { AchievementsView } from '@/components/codeflow/achievements-view'
-import { ACHIEVEMENTS, createAchievementProfile, isAchievementProfile, migrateAchievementProfile, recordAchievementActivity, type AchievementActivity, type AchievementDefinition } from '@/lib/achievements'
-import { analyzeCode } from '@/lib/diagram'
-import { starterFiles } from '@/lib/codeflow-examples'
-import { SUPPORTED_LANGUAGES, LANGUAGE_DEFINITIONS, acceptedFileExtensions, getLanguageDefinition, isLanguage, languageFromFileName } from '@/lib/languages'
-import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
-import type { CodeFile, ExecutionOutput, Language, RunSnapshot, RunStatus, SafeValue, SandboxExecutionResult, TraceEntry } from '@/lib/codeflow-types'
+import { AppearanceMenu, useMaterialTheme } from '@/components/codeflow/appearance-menu'
+import { ConsolePanel } from '@/components/codeflow/console-panel'
+import { FlowCanvas } from '@/components/codeflow/flow-canvas'
+import { HelpDialog } from '@/components/codeflow/help-dialog'
+import { NODE_LABELS, OPERATION_LABELS } from '@/components/codeflow/node-kinds'
+import { NewFileDialog, NameDialog } from '@/components/codeflow/prompt-dialog'
+import { Button } from '@/components/ui/button'
 import {
-  createEmptyState,
-  createProject,
-  createFile,
-  createFolder,
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from '@/components/ui/menu'
+import {
+  ACHIEVEMENTS,
+  createAchievementProfile,
+  isAchievementProfile,
+  migrateAchievementProfile,
+  recordAchievementActivity,
+  type AchievementActivity,
+  type AchievementDefinition,
+} from '@/lib/achievements'
+import { starterFiles } from '@/lib/codeflow-examples'
+import type { CodeFile, ExecutionOutput, FlowCardEdge, Language, RunSnapshot, RunStatus } from '@/lib/codeflow-types'
+import { analyzeCode } from '@/lib/diagram'
+import {
+  LANGUAGE_DEFINITIONS,
+  SUPPORTED_LANGUAGES,
+  acceptedFileExtensions,
+  getLanguageDefinition,
+  isLanguage,
+  languageFromFileName,
+} from '@/lib/languages'
+import { EXECUTION_LIMIT_NOTICE, EXECUTION_READY_NOTICE, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_SOURCE_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
+import {
   addProject,
-  deleteProject,
-  updateProjectName,
-  deleteFolder,
-  deleteFile,
-  updateFileCode,
-  renameFile,
-  setActiveProject,
-  setActiveFile,
-  setActiveFolder,
-  getProject,
+  createEmptyState,
+  createFile,
+  createProject,
+  deleteFile as deleteStoredFile,
   getActiveProject,
-  getFolder,
-  getFoldersInFolder,
-  getFilesInFolder,
-  getFile,
   loadStorage,
+  renameFile as renameStoredFile,
   saveStorage,
+  setActiveFile,
+  updateFileCode,
+  updateFileMeta,
+  updateProjectName,
   type Project,
-  type Folder,
   type StorageState,
 } from '@/lib/storage'
 
 const CodeEditor = dynamic(() => import('@monaco-editor/react'), {
   ssr: false,
-  loading: () => <div className="editor-loading"><LoaderCircle className="spin" aria-hidden="true" /> Preparando el editor</div>,
+  loading: () => <div className="cf-editor__loading"><LoaderCircle className="cf-spin" aria-hidden="true" /> Preparando el editor</div>,
 })
 
 const achievementStorageKey = 'codeflow-achievements-v1'
-const STORAGE_KEY = 'codeflow-storage-v1'
 
-type InspectorTab = 'variables' | 'stack' | 'history'
-type BottomTab = 'console' | 'trace'
+type MonacoInstance = Parameters<OnMount>[1]
 
-function formatValue(value: SafeValue): string {
-  if (typeof value === 'string') return JSON.stringify(value)
-  if (typeof value === 'object' && value !== null) return JSON.stringify(value)
-  return String(value)
-}
-
-function valueKind(value: SafeValue): string {
-  if (value === null) return 'null'
-  if (Array.isArray(value)) return 'array'
-  if (typeof value === 'object') return 'object'
-  return typeof value
-}
-
-function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
-}
+type InspectorTab = 'symbols' | 'history'
+type MobilePane = 'files' | 'editor' | 'diagram' | 'inspector'
+type DialogState =
+  | { kind: 'none' }
+  | { kind: 'new-file' }
+  | { kind: 'rename-file'; file: CodeFile }
+  | { kind: 'rename-project' }
 
 function getExtension(name: string): Language {
   return languageFromFileName(name) ?? 'javascript'
 }
 
-function isStoredFile(value: unknown): value is CodeFile {
-  if (!value || typeof value !== 'object') return false
-  const file = value as Partial<CodeFile>
-  return typeof file.id === 'string'
-    && typeof file.name === 'string'
-    && typeof file.code === 'string'
-    && isLanguage(file.language)
+function slugify(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'proyecto'
+}
+
+function baseName(path: string): string {
+  return path.split('/').at(-1) ?? path
+}
+
+/**
+ * Publica los temas de Monaco a partir de los roles de color activos, de modo
+ * que el editor y la interfaz compartan la misma paleta.
+ */
+function defineEditorThemes(monaco: MonacoInstance, isDark: boolean) {
+  const styles = getComputedStyle(document.documentElement)
+  // Monaco exige el color de los tokens sin almohadilla y el de los fondos con ella.
+  const token = (name: string, fallback: string) => {
+    const value = styles.getPropertyValue(name).trim().replace(/^#/, '')
+    return /^[0-9a-f]{6}$/i.test(value) ? value : fallback
+  }
+  const color = (name: string, fallback: string) => {
+    const value = styles.getPropertyValue(name).trim()
+    return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback
+  }
+  const rules = [
+    { token: 'keyword', foreground: token('--md-sys-color-tertiary', 'c5a6ff') },
+    { token: 'string', foreground: token('--md-sys-color-secondary', 'b6d68a') },
+    { token: 'number', foreground: token('--md-sys-color-primary', 'e7b56b') },
+    { token: 'comment', foreground: token('--md-sys-color-on-surface-variant', '66736e'), fontStyle: 'italic' },
+    { token: 'type', foreground: token('--md-sys-color-primary-container', 'a5c99a') },
+    { token: 'function', foreground: token('--md-sys-color-primary', 'e7b56b') },
+  ]
+  const canvas = color('--md-sys-color-surface-container-lowest', '#0e1212')
+  const raised = color('--md-sys-color-surface-container-low', '#141a1a')
+
+  monaco.editor.defineTheme('codeflow-graphite', {
+    base: 'vs-dark',
+    inherit: true,
+    rules,
+    colors: {
+      'editor.background': canvas,
+      'editor.foreground': color('--md-sys-color-on-surface', '#dde4e0'),
+      'editorLineNumber.foreground': color('--md-sys-color-outline', '#6d7976'),
+      'editorLineNumber.activeForeground': color('--md-sys-color-on-surface-variant', '#b4c0bb'),
+      'editorCursor.foreground': color('--md-sys-color-primary', '#bdff82'),
+      'editor.selectionBackground': `${color('--md-sys-color-primary', '#bdff82')}44`,
+      'editor.lineHighlightBackground': raised,
+      'editorGutter.background': canvas,
+      'editorIndentGuide.background1': color('--md-sys-color-outline-variant', '#202826'),
+    },
+  })
+
+  monaco.editor.defineTheme('codeflow-paper', {
+    base: 'vs',
+    inherit: true,
+    rules,
+    colors: {
+      'editor.background': canvas,
+      'editor.foreground': color('--md-sys-color-on-surface', '#1a211c'),
+      'editorLineNumber.foreground': color('--md-sys-color-outline', '#727970'),
+      'editorLineNumber.activeForeground': color('--md-sys-color-on-surface-variant', '#424a43'),
+      'editorCursor.foreground': color('--md-sys-color-primary', '#386b4f'),
+      'editor.lineHighlightBackground': raised,
+      'editorGutter.background': canvas,
+      'editorIndentGuide.background1': color('--md-sys-color-outline-variant', '#c4cbc4'),
+    },
+  })
+
+  monaco.editor.setTheme(isDark ? 'codeflow-graphite' : 'codeflow-paper')
 }
 
 export function CodeflowStudio() {
@@ -96,59 +166,54 @@ export function CodeflowStudio() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [storageLoaded, setStorageLoaded] = useState(false)
   const [status, setStatus] = useState<RunStatus>('idle')
-  const [trace, setTrace] = useState<TraceEntry[]>([])
-  const [activeStep, setActiveStep] = useState(-1)
   const [logs, setLogs] = useState<ExecutionOutput[]>([])
   const [snapshots, setSnapshots] = useState<RunSnapshot[]>([])
-  const [historicalView, setHistoricalView] = useState<RunSnapshot | null>(null)
   const [selectedSnapshots, setSelectedSnapshots] = useState<string[]>([])
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1)
-  const [manualEdges, setManualEdges] = useState<import('@/lib/codeflow-types').FlowCardEdge[]>([])
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('variables')
-  const [bottomTab, setBottomTab] = useState<BottomTab>('console')
-  const [variableQuery, setVariableQuery] = useState('')
+  const [historicalView, setHistoricalView] = useState<RunSnapshot | null>(null)
+  const [manualEdges, setManualEdges] = useState<FlowCardEdge[]>([])
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('symbols')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [sourceEdit, setSourceEdit] = useState('')
   const [sourceLineOriginal, setSourceLineOriginal] = useState('')
-  const [mobilePane, setMobilePane] = useState<'editor' | 'diagram' | 'inspector'>('editor')
+  const [mobilePane, setMobilePane] = useState<MobilePane>('editor')
   const [isImporting, setIsImporting] = useState(false)
   const [fileFilter, setFileFilter] = useState('')
   const [notice, setNotice] = useState(EXECUTION_READY_NOTICE)
   const [showHelp, setShowHelp] = useState(false)
+  const [consoleCollapsed, setConsoleCollapsed] = useState(false)
+  const [dialog, setDialog] = useState<DialogState>({ kind: 'none' })
   const [profile, setProfile] = useState<ReturnType<typeof createAchievementProfile> | null>(null)
   const [progressLoaded, setProgressLoaded] = useState(false)
   const [achievementsOpen, setAchievementsOpen] = useState(false)
   const [achievementToasts, setAchievementToasts] = useState<AchievementDefinition[]>([])
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+  const monacoRef = useRef<MonacoInstance | null>(null)
   const executionAbortRef = useRef<AbortController | null>(null)
   const decorationIdsRef = useRef<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileSearchRef = useRef<HTMLInputElement>(null)
   const previousUnlocksRef = useRef<{ profileId: string; ids: Set<string> } | null>(null)
+  const activeProjectIdRef = useRef<string | null>(null)
+
+  useEffect(() => { activeProjectIdRef.current = activeProjectId }, [activeProjectId])
 
   const storageState: StorageState = { version: 1, projects, activeProjectId }
   const activeProject = getActiveProject(storageState)
   const files = activeProject?.files ?? []
-  const folders = activeProject?.folders ?? []
   const activeFileId = activeProject?.activeFileId ?? null
-  const activeFolderId = activeProject?.activeFolderId ?? null
-  const activeFile = files.find((file) => file.id === activeFileId) ?? files[0]
-  const displayCode = historicalView?.code ?? activeFile.code
-  const displayLanguage = historicalView?.language ?? activeFile.language
-  const displayFileName = historicalView?.fileName ?? activeFile.name
+  const activeFile = files.find((file) => file.id === activeFileId) ?? files[0] ?? null
+  const projectName = activeProject?.name ?? 'Proyecto'
+  const displayCode = historicalView?.code ?? activeFile?.code ?? ''
+  const displayLanguage = historicalView?.language ?? activeFile?.language ?? 'javascript'
+  const displayFileName = historicalView?.fileName ?? activeFile?.name ?? ''
   const graph = useMemo(() => analyzeCode(displayCode, displayLanguage), [displayCode, displayLanguage])
-  const currentStep = trace[activeStep] ?? null
   const isRuntimeBusy = status === 'running' || status === 'loading'
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? null
-  const activeOperation = currentStep?.operationId ? graph.nodes.find((node) => node.data.operationId === currentStep.operationId) ?? null : null
-  const visibleTrace = useMemo(() => {
-    const start = Math.max(0, Math.min(activeStep - 50, trace.length - 100))
-    return trace.slice(start, start + 100).map((step, index) => ({ step, index: start + index }))
-  }, [activeStep, trace])
-  const sortedVariables = useMemo(() => Object.entries(currentStep?.locals ?? {}).sort(([left], [right]) => left.localeCompare(right)), [currentStep])
-  const visibleVariables = useMemo(() => sortedVariables.filter(([name]) => name.toLowerCase().includes(variableQuery.trim().toLowerCase())), [sortedVariables, variableQuery])
   const comparedSnapshots = snapshots.filter((snapshot) => selectedSnapshots.includes(snapshot.id))
+  const starterTemplate = activeFile?.templateId
+    ? starterFiles.find((file) => file.id === activeFile.templateId) ?? null
+    : null
+  const unlockedCount = profile ? Object.keys(profile.unlocked).length : 0
 
   useEffect(() => {
     let restored: StorageState | null = null
@@ -161,12 +226,11 @@ export function CodeflowStudio() {
       setProjects(restored.projects)
       setActiveProjectId(restored.activeProjectId ?? restored.projects[0].id)
     } else {
-      // Proyecto de ejemplo por defecto cuando no hay nada almacenado.
       const starter = createProject('Proyecto de ejemplo')
       const rootFolder = starter.folders[0]
       let next = addProject(createEmptyState(), starter)
       for (const file of starterFiles) {
-        next = createFile(next, starter.id, rootFolder.id, file.name, file.language, file.code)
+        next = createFile(next, starter.id, rootFolder.id, file.name, file.language, file.code, file.id)
       }
       next = setActiveFile(next, starter.id, starterFiles[0].id)
       setProjects(next.projects)
@@ -240,40 +304,12 @@ export function CodeflowStudio() {
     setProfile((current) => current ? recordAchievementActivity(current, activity).profile : current)
   }, [])
 
-  useEffect(() => {
-    if (status !== 'complete' || !isPlaying || trace.length < 2) return
-    const interval = window.setInterval(() => {
-      setActiveStep((current) => {
-        const next = Math.min(current + 1, trace.length - 1)
-        if (next >= trace.length - 1) setIsPlaying(false)
-        return next
-      })
-    }, Math.max(160, 720 / speed))
-    return () => window.clearInterval(interval)
-  }, [isPlaying, speed, status, trace])
-
-  useEffect(() => {
-    if (activeStep >= 0 && trace[activeStep]) {
-      const line = trace[activeStep].line
-      editorRef.current?.revealLineInCenter(line)
-      editorRef.current?.setPosition({ lineNumber: line, column: 1 })
-    }
-  }, [activeStep, trace])
-
-  useEffect(() => {
-    if (!editorRef.current) return
-    const decorations: Parameters<Parameters<OnMount>[0]['deltaDecorations']>[1] = currentStep
-      ? [{ range: { startLineNumber: currentStep.line, endLineNumber: currentStep.line, startColumn: 1, endColumn: 1 }, options: { isWholeLine: true, className: 'codeflow-active-line' } }]
-      : []
-    decorationIdsRef.current = editorRef.current.deltaDecorations(decorationIdsRef.current, decorations)
-  }, [activeFileId, currentStep])
-
   const mutateProject = useCallback((mutate: (state: StorageState) => StorageState) => {
     setProjects((current) => {
-      const state: StorageState = { version: 1, projects: current, activeProjectId }
+      const state: StorageState = { version: 1, projects: current, activeProjectId: activeProjectIdRef.current }
       return mutate(state).projects
     })
-  }, [activeProjectId])
+  }, [])
 
   const updateActiveCode = useCallback((code: string) => {
     setHistoricalView(null)
@@ -284,6 +320,18 @@ export function CodeflowStudio() {
     })
     recordProgress({ type: 'edit', code })
   }, [mutateProject, recordProgress])
+
+  /**
+   * El tema del editor se deriva de los mismos roles que la interfaz, así que
+   * la paleta activa también tiñe el código.
+   */
+  const applyEditorTheme = useCallback((monaco: MonacoInstance) => {
+    try {
+      defineEditorThemes(monaco, isDark)
+    } catch (error) {
+      console.error('[codeflow] no se pudo aplicar el tema del editor', error)
+    }
+  }, [isDark])
 
   const openLine = useCallback((nodeId: string) => {
     const node = graph.nodes.find((item) => item.id === nodeId)
@@ -300,30 +348,17 @@ export function CodeflowStudio() {
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
-    monaco.editor.defineTheme('codeflow-graphite', {
-      base: 'vs-dark', inherit: true, rules: [
-        { token: 'keyword', foreground: 'C5A6FF' },
-        { token: 'string', foreground: 'B6D68A' },
-        { token: 'number', foreground: 'E7B56B' },
-        { token: 'comment', foreground: '66736E', fontStyle: 'italic' },
-      ],
-      colors: {
-        'editor.background': '#0d1114',
-        'editorLineNumber.foreground': '#424b4a',
-        'editorLineNumber.activeForeground': '#b4c0bb',
-        'editorCursor.foreground': '#bdff82',
-        'editor.selectionBackground': '#5a744f66',
-        'editor.lineHighlightBackground': '#131b1a',
-        'editorGutter.background': '#0d1114',
-        'editorIndentGuide.background1': '#202826',
-      },
-    })
-      monaco.editor.setTheme(isDark ? 'codeflow-graphite' : 'vs')
-      editor.updateOptions({ glyphMargin: false, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
-  }, [isDark])
+    monacoRef.current = monaco
+    applyEditorTheme(monaco)
+    editor.updateOptions({ glyphMargin: false, fontSize: 13, lineHeight: 23, fontFamily: 'Geist Mono, ui-monospace, monospace', padding: { top: 15, bottom: 14 }, minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true, renderLineHighlight: 'line', roundedSelection: false, contextmenu: true, bracketPairColorization: { enabled: true } })
+  }, [applyEditorTheme])
+
+  useEffect(() => {
+    if (monacoRef.current) applyEditorTheme(monacoRef.current)
+  }, [applyEditorTheme])
 
   const runCode = useCallback(async () => {
-    if (historicalView) return
+    if (historicalView || !activeFile) return
 
     const sourceBytes = new TextEncoder().encode(activeFile.code).byteLength
     if (sourceBytes > MAX_EXECUTION_SOURCE_BYTES) {
@@ -331,17 +366,12 @@ export function CodeflowStudio() {
       setStatus('error')
       setLogs([{ stream: 'stderr', text: message }])
       setNotice(message)
-      setBottomTab('console')
       return
     }
 
     const controller = new AbortController()
     executionAbortRef.current = controller
-    setIsPlaying(false)
-    setBottomTab('console')
     setStatus('loading')
-    setTrace([])
-    setActiveStep(-1)
     setLogs([])
     setNotice('Creando una microVM desechable…')
 
@@ -361,7 +391,13 @@ export function CodeflowStudio() {
       }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Respuesta de ejecución no válida.')
 
-      const result = payload as SandboxExecutionResult
+      const result = payload as {
+        output: ExecutionOutput[]
+        exitCode: number
+        durationMs: number
+        timedOut: boolean
+        outputTruncated: boolean
+      }
       if (!Array.isArray(result.output) || typeof result.exitCode !== 'number') throw new Error('Respuesta de ejecución no válida.')
 
       const output = result.output.length ? result.output : result.timedOut
@@ -372,8 +408,6 @@ export function CodeflowStudio() {
             ? [{ stream: 'stderr' as const, text: `El proceso terminó con código ${result.exitCode}.` }]
             : []
       setLogs(output)
-      setTrace([])
-      setActiveStep(-1)
       const snapshot: RunSnapshot = {
         id: crypto.randomUUID(),
         fileId: activeFile.id,
@@ -381,7 +415,6 @@ export function CodeflowStudio() {
         language: activeFile.language,
         code: activeFile.code,
         createdAt: Date.now(),
-        steps: [],
         output,
       }
       setSnapshots((current) => [snapshot, ...current].slice(0, 8))
@@ -427,89 +460,109 @@ export function CodeflowStudio() {
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.key === 'Enter') {
         event.preventDefault()
-        runCode()
+        void runCode()
       } else if (event.key.toLowerCase() === 'p') {
         event.preventDefault()
         fileSearchRef.current?.focus()
+      } else if (event.key === '?' || event.key === '/') {
+        event.preventDefault()
+        setShowHelp(true)
       }
     }
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [runCode])
 
-  useEffect(() => {
-    if (!showHelp) return
-    const handleEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowHelp(false) }
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [showHelp])
-
-  const togglePlayback = useCallback(() => {
-    if (isPlaying) {
-      setIsPlaying(false)
-      setStatus('paused')
-      setNotice('Reproducción pausada · inspecciona las variables del paso actual.')
-    } else if (trace.length) {
-      setIsPlaying(true)
-      setStatus('complete')
-      if (activeStep >= trace.length - 1) setActiveStep(0)
-      setNotice('Reproduciendo el registro capturado.')
-    }
-  }, [activeStep, isPlaying, trace.length])
-
-  const stepBy = useCallback((delta: number) => {
-    setIsPlaying(false)
-    setStatus('paused')
-    setActiveStep((current) => Math.min(Math.max(current + delta, 0), Math.max(trace.length - 1, 0)))
-    setNotice('Paso seleccionado · variables tomadas de la ejecución original.')
-  }, [trace.length])
-
-  const addFile = useCallback(() => {
-    const language = activeFile.language
-    const number = files.length + 1
-    const extension = getLanguageDefinition(language).extension
-    const name = `src/nuevo-${number}.${extension}`
+  const openFile = useCallback((fileId: string) => {
     setHistoricalView(null)
+    setSelectedNodeId(null)
+    setManualEdges([])
+    setStatus('idle')
+    setLogs([])
+    setNotice(EXECUTION_READY_NOTICE)
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return setActiveFile(state, project.id, fileId)
+    })
+    setMobilePane('editor')
+  }, [mutateProject])
+
+  const changeLanguage = useCallback((language: Language) => {
+    if (!activeFile || language === activeFile.language) return
+    recordProgress({ type: 'explore', feature: 'language' })
+    setHistoricalView(null)
+    const extension = getLanguageDefinition(language).extension
+    const name = /\.[^./]+$/.test(activeFile.name)
+      ? activeFile.name.replace(/\.[^./]+$/, `.${extension}`)
+      : `${activeFile.name}.${extension}`
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return updateFileMeta(state, project.id, activeFile.id, { language, name })
+    })
+    setNotice(`Lenguaje cambiado a ${LANGUAGE_DEFINITIONS[language].label}.`)
+  }, [activeFile, mutateProject, recordProgress])
+
+  const createNewFile = useCallback((name: string, language: Language) => {
     mutateProject((state) => {
       const project = getActiveProject(state)
       if (!project) return state
       return createFile(state, project.id, project.activeFolderId, name, language, '')
     })
-    setTrace([])
-    setLogs([])
-    setActiveStep(-1)
-    setStatus('idle')
+    setDialog({ kind: 'none' })
     setNotice(`Archivo ${name} creado.`)
     recordProgress({ type: 'explore', feature: 'file' })
-  }, [activeFile.language, files.length, mutateProject, recordProgress])
+  }, [mutateProject, recordProgress])
 
-  const deleteFile = useCallback((id: string) => {
+  const renameFile = useCallback((fileId: string, name: string) => {
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return renameStoredFile(state, project.id, fileId, name)
+    })
+    setDialog({ kind: 'none' })
+    setNotice(`Archivo renombrado a ${name}.`)
+  }, [mutateProject])
+
+  const duplicateFile = useCallback((file: CodeFile) => {
+    const copyName = file.name.replace(/(\.[^./]+)$/, '-copia$1')
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return createFile(state, project.id, file.folderId ?? project.activeFolderId, copyName, file.language, file.code)
+    })
+    setNotice(`${copyName} duplicado.`)
+  }, [mutateProject])
+
+  const removeFile = useCallback((fileId: string) => {
     if (files.length <= 1) {
       setNotice('Debe quedar al menos un archivo en el proyecto.')
       return
     }
-    const index = files.findIndex((file) => file.id === id)
-    if (index < 0) return
-    const removed = files[index]
-    const remaining = files.filter((file) => file.id !== id)
-    setFiles(remaining)
-    if (activeFileId === id) setActiveFileId(remaining[Math.min(index, remaining.length - 1)].id)
+    const removed = files.find((file) => file.id === fileId)
+    if (!removed) return
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return deleteStoredFile(state, project.id, fileId)
+    })
     setHistoricalView(null)
     setSelectedNodeId(null)
     setManualEdges([])
-    setTrace([])
-    setLogs([])
-    setActiveStep(-1)
     setStatus('idle')
+    setLogs([])
     setNotice(`Archivo ${removed.name} eliminado.`)
-  }, [activeFileId, files])
+  }, [files, mutateProject])
 
   const importFiles = useCallback(async (items: FileList | null) => {
     if (!items?.length) return
     setIsImporting(true)
     try {
       const selectedFiles = Array.from(items)
-      if (selectedFiles.length > 50 || selectedFiles.some((item) => item.size > (item.name.endsWith('.codeflow.json') ? 25_000_000 : 2_000_000))) throw new Error('El límite es de 50 archivos; código hasta 2 MB y proyectos CodeFlow hasta 25 MB.')
+      if (selectedFiles.length > 50 || selectedFiles.some((item) => item.size > (item.name.endsWith('.codeflow.json') ? 25_000_000 : 2_000_000))) {
+        throw new Error('El límite es de 50 archivos; código hasta 2 MB y proyectos CodeFlow hasta 25 MB.')
+      }
       const imported: CodeFile[] = []
       const createId = () => `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const cleanName = (name: string) => name.split('/').filter((part) => part && part !== '.' && part !== '..').map((part) => part.replace(/[^\w.-]/g, '-')).join('/') || 'archivo.js'
@@ -539,34 +592,103 @@ export function CodeflowStudio() {
       }
       if (imported.length > 50) throw new Error('El proyecto contiene más de 50 archivos.')
       setHistoricalView(null)
-      setFiles((current) => [...current, ...imported])
-      setActiveFileId(imported[0].id)
-      setTrace([])
-      setLogs([])
-      setActiveStep(-1)
+      mutateProject((state) => {
+        const project = getActiveProject(state)
+        if (!project) return state
+        let next = state
+        for (const file of imported) {
+          next = createFile(next, project.id, project.activeFolderId, file.name, file.language, file.code)
+        }
+        return next
+      })
       setStatus('idle')
+      setLogs([])
       setNotice(`${imported.length} archivo${imported.length === 1 ? '' : 's'} importado${imported.length === 1 ? '' : 's'}.`)
       recordProgress({ type: 'explore', feature: 'import' })
+    } catch (error) {
+      setStatus('error')
+      setNotice(error instanceof Error ? error.message : 'No se pudieron importar los archivos.')
     } finally {
       setIsImporting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
-  }, [recordProgress])
+  }, [mutateProject, recordProgress])
 
-  const exportActiveFile = useCallback(() => {
-    const blob = new Blob([displayCode], { type: 'text/plain;charset=utf-8' })
+  const downloadFile = useCallback((contents: string, filename: string, mime: string) => {
+    const blob = new Blob([contents], { type: mime })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = displayFileName.split('/').at(-1) ?? 'codigo.js'
+    link.download = filename
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    setNotice(`Se exportó ${link.download}.`)
+  }, [])
+
+  const exportActiveFile = useCallback(() => {
+    downloadFile(displayCode, baseName(displayFileName) || 'codigo.js', 'text/plain;charset=utf-8')
+    setNotice(`Se exportó ${baseName(displayFileName)}.`)
     recordProgress({ type: 'export', target: 'file' })
-  }, [displayCode, displayFileName, recordProgress])
+  }, [displayCode, displayFileName, downloadFile, recordProgress])
+
+  const exportProject = useCallback(() => {
+    if (!activeProject) return
+    const bundle = {
+      format: 'codeflow-project',
+      version: 1,
+      name: activeProject.name,
+      files: files.map(({ name, language, code }) => ({ name, language, code })),
+    }
+    downloadFile(JSON.stringify(bundle, null, 2), `${slugify(activeProject.name)}.codeflow.json`, 'application/json;charset=utf-8')
+    setNotice(`${files.length} archivo${files.length === 1 ? '' : 's'} exportado${files.length === 1 ? '' : 's'} como proyecto CodeFlow.`)
+    recordProgress({ type: 'export', target: 'project' })
+  }, [activeProject, downloadFile, files, recordProgress])
+
+  const exportDiagram = useCallback(() => {
+    const diagram = {
+      format: 'codeflow-diagram',
+      version: 1,
+      file: displayFileName,
+      language: displayLanguage,
+      nodes: graph.nodes.map(({ id, position, data }) => ({ id, position, ...data })),
+      edges: [...graph.edges, ...manualEdges],
+    }
+    downloadFile(
+      JSON.stringify(diagram, null, 2),
+      `${baseName(displayFileName).replace(/\.[^.]+$/, '') || 'diagrama'}.diagram.json`,
+      'application/json;charset=utf-8',
+    )
+    setNotice(`Diagrama de ${displayFileName} exportado como JSON.`)
+    recordProgress({ type: 'export', target: 'diagram' })
+  }, [displayFileName, displayLanguage, downloadFile, graph, manualEdges, recordProgress])
+
+  const copyCode = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(displayCode)
+      setNotice('Código copiado al portapapeles.')
+    } catch {
+      setNotice('No se pudo copiar el código.')
+    }
+  }, [displayCode])
+
+  const restoreStarter = useCallback(() => {
+    if (!starterTemplate || !activeFile) return
+    updateActiveCode(starterTemplate.code)
+    setNotice(`Se restauró el ejemplo original de ${baseName(activeFile.name)}.`)
+    recordProgress({ type: 'reset' })
+  }, [activeFile, recordProgress, starterTemplate, updateActiveCode])
+
+  const renameProject = useCallback((name: string) => {
+    mutateProject((state) => {
+      const project = getActiveProject(state)
+      if (!project) return state
+      return updateProjectName(state, project.id, name)
+    })
+    setDialog({ kind: 'none' })
+    setNotice(`Proyecto renombrado a ${name}.`)
+  }, [mutateProject])
 
   const applySourceEdit = useCallback(() => {
-    if (!selectedNode || historicalView) return
+    if (!selectedNode || historicalView || !activeFile) return
     const lines = activeFile.code.split('\n')
     const index = selectedNode.data.line - 1
     if (lines[index] !== sourceLineOriginal) {
@@ -578,33 +700,7 @@ export function CodeflowStudio() {
     setSourceLineOriginal(sourceEdit)
     recordProgress({ type: 'apply-edit' })
     setNotice(`Línea ${selectedNode.data.line} sincronizada con el diagrama.`)
-  }, [activeFile.code, historicalView, recordProgress, selectedNode, sourceEdit, sourceLineOriginal, updateActiveCode])
-
-  const exportProject = useCallback(() => {
-    const bundle = { format: 'codeflow-project', version: 1, name: 'algoritmos-visuales', files: files.map(({ name, language, code }) => ({ name, language, code })) }
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'algoritmos-visuales.codeflow.json'
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    setNotice(`${files.length} archivos exportados como proyecto CodeFlow.`)
-    recordProgress({ type: 'export', target: 'project' })
-  }, [files, recordProgress])
-
-  const exportDiagram = useCallback(() => {
-    const diagram = { format: 'codeflow-diagram', version: 1, file: displayFileName, language: displayLanguage, nodes: graph.nodes.map(({ id, position, data }) => ({ id, position, ...data })), edges: [...graph.edges, ...manualEdges] }
-    const blob = new Blob([JSON.stringify(diagram, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${displayFileName.split('/').at(-1)?.replace(/\.[^.]+$/, '') ?? 'diagrama'}.diagram.json`
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    setNotice(`Diagrama de ${displayFileName} exportado como JSON.`)
-    recordProgress({ type: 'export', target: 'diagram' })
-  }, [displayFileName, displayLanguage, graph, manualEdges, recordProgress])
+  }, [activeFile, historicalView, recordProgress, selectedNode, sourceEdit, sourceLineOriginal, updateActiveCode])
 
   const clearConsole = useCallback(() => {
     setLogs([])
@@ -617,203 +713,680 @@ export function CodeflowStudio() {
 
   const selectSnapshot = useCallback((snapshot: RunSnapshot) => {
     setHistoricalView(snapshot)
-    if (files.some((file) => file.id === snapshot.fileId)) setActiveFileId(snapshot.fileId)
-    setTrace(snapshot.steps)
-    setLogs(snapshot.output)
-    setActiveStep(snapshot.steps.length ? snapshot.steps.length - 1 : -1)
-    setIsPlaying(false)
+    if (files.some((file) => file.id === snapshot.fileId)) {
+      mutateProject((state) => {
+        const project = getActiveProject(state)
+        if (!project) return state
+        return setActiveFile(state, project.id, snapshot.fileId)
+      })
+    }
     setStatus('paused')
-    setInspectorTab('variables')
+    setInspectorTab('history')
     recordProgress({ type: 'snapshot' })
     setNotice(`Vista de historial · ${new Date(snapshot.createdAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`)
-  }, [files, recordProgress])
+  }, [files, mutateProject, recordProgress])
 
-  const filteredFiles = files.filter((file) => file.name.toLowerCase().includes(fileFilter.toLowerCase()))
+  const filteredFiles = files.filter((file) => file.name.toLowerCase().includes(fileFilter.trim().toLowerCase()))
+  const lineCount = displayCode ? displayCode.split('\n').length : 0
+
+  /** Las pestañas del inspector se recorren con las flechas, como un tablist real. */
+  const moveInspectorTab = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+    event.preventDefault()
+    const next: InspectorTab = inspectorTab === 'symbols' ? 'history' : 'symbols'
+    setInspectorTab(next)
+    recordProgress({ type: 'inspector', tab: next })
+    document.getElementById(next === 'symbols' ? 'cf-tab-symbols' : 'cf-tab-history')?.focus()
+  }, [inspectorTab, recordProgress])
 
   return (
-    <main className={`codeflow-shell ${achievementsOpen ? 'codeflow-shell--achievements' : ''}`}>
-      <header className="topbar">
-        <a className="brand" href="#inicio" aria-label="CodeFlow Studio, inicio">
-          <span className="brand-mark"><Code2 aria-hidden="true" /></span>
-          <span className="brand-name">codeflow<span className="brand-dot">.</span><span className="brand-studio">studio</span></span>
-        </a>
-        <div className="topbar-divider" />
-        <div className="project-crumb"><Folder aria-hidden="true" /><span>proyectos</span><ChevronDown aria-hidden="true" /><span className="crumb-separator">/</span><strong>algoritmos-visuales</strong><ChevronDown aria-hidden="true" /></div>
-        <div className="topbar-spacer" />
-        <ColorThemeControls mode={mode} seed={seed} onModeChange={setMode} onSeedChange={setSeed} />
-        <button className={`achievement-nav ${achievementsOpen ? 'is-active' : ''}`} type="button" aria-pressed={achievementsOpen} onClick={() => setAchievementsOpen((open) => !open)}><Trophy aria-hidden="true" /><span>{achievementsOpen ? 'Editor' : 'Logros'}</span>{profile && <small>{Object.keys(profile.unlocked).length}</small>}</button>
-        <div className="session-indicator"><span className="connection-dot" /> Sesión local</div>
-        <Button variant="ghost" size="icon-sm" aria-label="Ayuda y atajos de teclado" title="Ayuda y atajos de teclado" onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}><Keyboard aria-hidden="true" /></Button>
-        <button className="avatar-button" type="button" aria-label="Perfil local">CF</button>
-      </header>
+    <main className="cf-app">
+      {achievementsOpen && profile ? (
+        <AchievementsView
+          profile={profile}
+          onBack={() => setAchievementsOpen(false)}
+          onRename={(name) => setProfile((current) => current ? { ...current, name } : current)}
+        />
+      ) : (
+        <>
+          <header className="cf-toolbar">
+            <div className="cf-toolbar__leading">
+              <span className="cf-brand">
+                <span className="cf-brand__mark"><APP_ICONS.code aria-hidden="true" /></span>
+                <span className="cf-brand__name">codeflow<span className="cf-brand__accent">.</span>studio</span>
+              </span>
+              <span className="cf-divider" aria-hidden="true" />
+              <Menu>
+                <MenuTrigger
+                  render={<Button variant="ghost" size="sm" />}
+                  className="cf-project-trigger"
+                  aria-label={`Proyecto ${projectName}. Acciones del proyecto`}
+                >
+                  <APP_ICONS.files aria-hidden="true" />
+                  <span className="cf-project-trigger__name">{projectName}</span>
+                  <APP_ICONS.chevronDown aria-hidden="true" />
+                </MenuTrigger>
+                <MenuContent align="start">
+                  <MenuGroup>
+                    <MenuGroupLabel>Proyecto</MenuGroupLabel>
+                    <MenuItem icon={APP_ICONS.rename} onClick={() => setDialog({ kind: 'rename-project' })}>Renombrar proyecto…</MenuItem>
+                    <MenuItem icon={APP_ICONS.exportProject} onClick={exportProject}>Exportar proyecto</MenuItem>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Sesión</MenuGroupLabel>
+                    <MenuItem
+                      icon={APP_ICONS.trophy}
+                      hint={`${unlockedCount}/${ACHIEVEMENTS.length}`}
+                      onClick={() => setAchievementsOpen(true)}
+                    >
+                      Logros y progresión
+                    </MenuItem>
+                    <MenuItem icon={APP_ICONS.help} shortcut="⌘?" onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}>
+                      Ayuda y atajos
+                    </MenuItem>
+                  </MenuGroup>
+                </MenuContent>
+              </Menu>
+            </div>
 
-      {achievementsOpen ? profile ? <AchievementsView profile={profile} /> : <section className="achievement-loading">Cargando progreso local…</section> : <>
-      <section className="toolbar" aria-label="Controles del proyecto">
-        <div className="toolbar-left">
-          <div className="runtime-select-wrap">
-            <span className={`language-mark language-mark--${displayLanguage}`}>{getLanguageDefinition(displayLanguage).mark}</span>
-            <select aria-label="Lenguaje del archivo" value={displayLanguage} disabled={isRuntimeBusy || Boolean(historicalView)} onChange={(event) => {
-              const language = event.target.value as Language
-              if (language !== activeFile.language) recordProgress({ type: 'explore', feature: 'language' })
-              setHistoricalView(null)
-              const extension = getLanguageDefinition(language).extension
-              setFiles((current) => current.map((file) => file.id === activeFileId ? { ...file, language, name: /\.[^./]+$/.test(file.name) ? file.name.replace(/\.[^./]+$/, `.${extension}`) : `${file.name}.${extension}` } : file))
-            }}>
-              {SUPPORTED_LANGUAGES.map((language) => <option key={language} value={language}>{LANGUAGE_DEFINITIONS[language].label}</option>)}
-            </select>
-            <ChevronDown aria-hidden="true" />
-          </div>
-          <span className="runtime-pill"><span className="runtime-dot" />{getLanguageDefinition(displayLanguage).runtimeName}</span>
-          <span className="toolbar-divider" />
-          <span className="file-title"><FileCode2 aria-hidden="true" />{displayFileName}</span>
-        </div>
-        <div className="toolbar-right">
-          {isRuntimeBusy ? <Button size="sm" className="run-button run-button--busy" onClick={cancelExecution} aria-label="Detener ejecución" title="Detener ejecución">
-            <Square data-icon="inline-start" aria-hidden="true" />Detener
-          </Button> : <Button size="sm" className="run-button" onClick={() => void runCode()} disabled={Boolean(historicalView)} aria-describedby="execution-limit-note" title={EXECUTION_LIMIT_NOTICE}>
-            <Play data-icon="inline-start" aria-hidden="true" />Ejecutar <kbd>⌘ Enter</kbd>
-          </Button>}
-          <span id="execution-limit-note" className="sr-only">{EXECUTION_LIMIT_NOTICE}</span>
-          <span className="toolbar-divider" />
-          <Button variant="ghost" size="icon-sm" aria-label="Exportar archivo" title="Exportar archivo" onClick={exportActiveFile}><ArrowDownToLine aria-hidden="true" /></Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Exportar proyecto" title="Exportar proyecto CodeFlow" onClick={exportProject}><Folder aria-hidden="true" /></Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Importar código" title="Importar archivos o proyecto" onClick={() => fileInputRef.current?.click()} disabled={isImporting}><Import aria-hidden="true" /></Button>
-          <input ref={fileInputRef} type="file" accept={`${acceptedFileExtensions()},.codeflow.json`} multiple className="visually-hidden" onChange={(event) => void importFiles(event.target.files)} aria-label="Seleccionar archivos para importar" />
-        </div>
-      </section>
+            <div className="cf-toolbar__trailing">
+              {isRuntimeBusy ? (
+                <Button size="default" className="cf-run-button cf-run-button--busy" onClick={cancelExecution} aria-label="Detener ejecución" title="Detener ejecución">
+                  <APP_ICONS.stop aria-hidden="true" />
+                  Detener
+                </Button>
+              ) : (
+                <Button
+                  size="default"
+                  className="cf-run-button"
+                  onClick={() => void runCode()}
+                  disabled={Boolean(historicalView) || !activeFile}
+                  aria-describedby="execution-limit-note"
+                  title={EXECUTION_LIMIT_NOTICE}
+                >
+                  <APP_ICONS.run aria-hidden="true" />
+                  Ejecutar
+                  <kbd className="cf-run-button__kbd">⌘↵</kbd>
+                </Button>
+              )}
+              <span id="execution-limit-note" className="visually-hidden">{EXECUTION_LIMIT_NOTICE}</span>
 
-      <div className="workspace">
-        <aside className="files-pane" aria-label="Archivos del proyecto">
-          <div className="pane-heading"><span>EXPLORADOR</span><Button variant="ghost" size="icon-xs" onClick={addFile} aria-label="Crear archivo" title="Crear archivo" disabled={isRuntimeBusy || Boolean(historicalView)}><FilePlus2 aria-hidden="true" /></Button></div>
-          <div className="project-folder"><ChevronDown aria-hidden="true" /><Folder aria-hidden="true" /><span>ALGORITMOS-VISUALES</span><span className="folder-count">{files.length}</span></div>
-          <label className="file-search"><Search aria-hidden="true" /><input ref={fileSearchRef} value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="Filtrar archivos" aria-label="Filtrar archivos" /><kbd>⌘ P</kbd></label>
-          <div className="file-list" role="list" aria-label="Archivos">
-            {filteredFiles.map((file) => (
-              <div className={`file-row-wrap ${activeFileId === file.id ? 'is-active' : ''}`} role="listitem" key={file.id}>
-                <button className={`file-row ${activeFileId === file.id ? 'is-active' : ''}`} type="button" onClick={() => { setHistoricalView(null); setActiveFileId(file.id); setSelectedNodeId(null); setManualEdges([]); setTrace([]); setLogs([]); setActiveStep(-1); setStatus('idle') }} disabled={isRuntimeBusy}>
-                  <span className={`file-language file-language--${file.language}`}>{getLanguageDefinition(file.language).mark}</span><span className="file-name">{file.name.split('/').at(-1)}</span>{activeFileId === file.id && <span className="file-edited-dot" aria-label="Archivo abierto" />}
-                </button>
-                <button className="file-delete" type="button" aria-label={`Eliminar ${file.name}`} title="Eliminar archivo" onClick={() => deleteFile(file.id)} disabled={isRuntimeBusy || files.length <= 1}><Trash2 aria-hidden="true" /></button>
+              <span className="cf-divider" aria-hidden="true" />
+
+              <AppearanceMenu mode={mode} seed={seed} isDark={isDark} onModeChange={setMode} onSeedChange={setSeed} />
+
+              <Menu>
+                <MenuTrigger
+                  render={<Button variant="ghost" size="icon-sm" />}
+                  className="cf-icon-button"
+                  aria-label="Más acciones"
+                  title="Más acciones"
+                >
+                  <APP_ICONS.more aria-hidden="true" />
+                </MenuTrigger>
+                <MenuContent align="end">
+                  <MenuGroup>
+                    <MenuGroupLabel>Archivo</MenuGroupLabel>
+                    <MenuItem icon={APP_ICONS.newFile} onClick={() => setDialog({ kind: 'new-file' })}>Nuevo archivo…</MenuItem>
+                    <MenuItem icon={APP_ICONS.import} onClick={() => fileInputRef.current?.click()} disabled={isImporting}>Importar archivos…</MenuItem>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Exportar</MenuGroupLabel>
+                    <MenuItem icon={APP_ICONS.exportFile} onClick={exportActiveFile}>Exportar archivo</MenuItem>
+                    <MenuItem icon={APP_ICONS.exportProject} onClick={exportProject}>Exportar proyecto</MenuItem>
+                    <MenuItem icon={APP_ICONS.exportDiagram} onClick={exportDiagram}>Exportar diagrama</MenuItem>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Vista</MenuGroupLabel>
+                    <MenuItem icon={APP_ICONS.copy} onClick={() => void copyCode()}>Copiar código</MenuItem>
+                    <MenuItem icon={APP_ICONS.delete} onClick={restoreStarter} disabled={!starterTemplate}>Restaurar ejemplo</MenuItem>
+                  </MenuGroup>
+                </MenuContent>
+              </Menu>
+
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="cf-icon-button"
+                aria-label="Ayuda y atajos de teclado"
+                title="Ayuda y atajos de teclado"
+                onClick={() => { recordProgress({ type: 'explore', feature: 'help' }); setShowHelp(true) }}
+              >
+                <APP_ICONS.help aria-hidden="true" />
+              </Button>
+            </div>
+          </header>
+
+          <div className="cf-workspace">
+            <aside className={`cf-files ${mobilePane === 'files' ? 'is-mobile-active' : ''}`} aria-label="Archivos del proyecto">
+              <div className="cf-pane-header">
+                <h2 className="cf-pane-title">Explorador</h2>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setDialog({ kind: 'new-file' })}
+                  aria-label="Nuevo archivo"
+                  title="Nuevo archivo"
+                  disabled={isRuntimeBusy}
+                >
+                  <APP_ICONS.newFile aria-hidden="true" />
+                </Button>
               </div>
-            ))}
-            {filteredFiles.length === 0 && <div className="file-empty">No se encontraron archivos</div>}
-          </div>
-          <div className="files-actions"><Button variant="ghost" size="sm" onClick={addFile} disabled={isRuntimeBusy || Boolean(historicalView)}><Plus data-icon="inline-start" aria-hidden="true" />Nuevo archivo</Button><Button variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} aria-label="Importar archivos" title="Importar archivos" disabled={isRuntimeBusy}><Import aria-hidden="true" /></Button></div>
-        </aside>
-
-        <section className={`editor-pane workspace-panel ${mobilePane === 'editor' ? 'mobile-active' : ''}`} aria-label="Editor de código">
-          <div className="panel-titlebar">
-            <div className="panel-title"><Code2 aria-hidden="true" /><span>CÓDIGO</span><span className="panel-title__muted">·</span><span className="panel-title__file">{displayFileName.split('/').at(-1)}</span>{historicalView && <span className="history-mode-tag">SNAPSHOT · SOLO LECTURA</span>}</div>
-            <div className="editor-actions"><span className="editor-language-tag">{getLanguageDefinition(displayLanguage).label}</span>{historicalView ? <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button> : <Button variant="ghost" size="icon-xs" aria-label="Restablecer ejemplo" title="Restablecer archivo actual" onClick={() => { recordProgress({ type: 'reset' }); const original = starterFiles.find((file) => file.id === activeFile.id); if (original) updateActiveCode(original.code); else updateActiveCode('') }}><RotateCcw aria-hidden="true" /></Button>}</div>
-          </div>
-          <div className="editor-wrap">
-            <CodeEditor
-              key={`${activeFile.id}-${displayLanguage}-${historicalView?.id ?? 'current'}`}
-              height="100%"
-              language={getLanguageDefinition(displayLanguage).monacoLanguage}
-              value={displayCode}
-              onChange={(value) => updateActiveCode(value ?? '')}
-              onMount={handleEditorMount}
-              theme={isDark ? 'codeflow-graphite' : 'vs'}
-              options={{ automaticLayout: true, glyphMargin: false, lineNumbers: 'on', lineNumbersMinChars: 3, folding: true, scrollBeyondLastLine: false, wordWrap: 'off', tabSize: getLanguageDefinition(displayLanguage).tabSize, insertSpaces: true, suggestOnTriggerCharacters: true, quickSuggestions: true, accessibilitySupport: 'auto', readOnly: isRuntimeBusy || Boolean(historicalView) }}
-            />
-          </div>
-          <div className="editor-footer"><span><CircleDot aria-hidden="true" />{displayCode.split('\n').length} líneas</span><span>Sin traza por línea</span><span>UTF-8</span><span>Spaces: {getLanguageDefinition(displayLanguage).tabSize}</span></div>
-        </section>
-
-        <section className={`diagram-pane workspace-panel ${mobilePane === 'diagram' ? 'mobile-active' : ''}`} aria-label="Diagrama del código">
-          <div className="panel-titlebar diagram-titlebar">
-            <div className="panel-title"><GitBranch aria-hidden="true" /><span>FLUJO</span><span className="node-count">{graph.nodes.length} nodos</span></div>
-            <div className="diagram-actions"><span className="live-indicator"><span />ANÁLISIS ESTÁTICO</span><Button variant="ghost" size="icon-xs" aria-label="Exportar diagrama JSON" title="Exportar diagrama JSON" onClick={exportDiagram}><ArrowDownToLine aria-hidden="true" /></Button></div>
-          </div>
-          <div className="diagram-body">
-            <FlowCanvas graph={graph} manualEdges={manualEdges} activeLine={currentStep?.line ?? null} activeOperationId={currentStep?.operationId ?? null} onSelectNode={(nodeId) => { recordProgress({ type: 'explore', feature: 'diagram' }); openLine(nodeId) }} onManualEdgesChange={setManualEdges} onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)} />
-          </div>
-          <div className="diagram-footer"><span><span className="legend-shape legend-shape--terminator" />Inicio / fin</span><span><span className="legend-shape legend-shape--process" />Proceso</span><span><span className="legend-shape legend-shape--decision" />Decisión</span><span><span className="legend-shape legend-shape--io" />Entrada / salida</span><span><span className="legend-shape legend-shape--connector" />Conector</span><span className="diagram-footer__hint">Arrastra para recorrer</span></div>
-        </section>
-
-        <aside className={`inspector-pane workspace-panel ${mobilePane === 'inspector' ? 'mobile-active' : ''}`} aria-label="Inspector">
-          <div className="panel-titlebar"><div className="panel-title"><PanelRight aria-hidden="true" /><span>INSPECTOR</span></div><Button variant="ghost" size="icon-xs" aria-label="Limpiar filtro" title="Limpiar filtro" onClick={() => setVariableQuery('')}><X aria-hidden="true" /></Button></div>
-          <div className="inspector-tabs" role="tablist" aria-label="Panel del inspector">
-            <button role="tab" aria-selected={inspectorTab === 'variables'} className={inspectorTab === 'variables' ? 'is-active' : ''} onClick={() => { setInspectorTab('variables'); recordProgress({ type: 'inspector', tab: 'variables' }) }}><Variable aria-hidden="true" /><span>Estado</span></button>
-            <button role="tab" aria-selected={inspectorTab === 'stack'} className={inspectorTab === 'stack' ? 'is-active' : ''} onClick={() => { setInspectorTab('stack'); recordProgress({ type: 'inspector', tab: 'stack' }) }}><ListTree aria-hidden="true" /><span>Pila</span></button>
-            <button role="tab" aria-selected={inspectorTab === 'history'} className={inspectorTab === 'history' ? 'is-active' : ''} onClick={() => { setInspectorTab('history'); recordProgress({ type: 'inspector', tab: 'history' }) }}><History aria-hidden="true" /><span>Historial</span></button>
-          </div>
-          <div className="inspector-content">
-            {inspectorTab === 'variables' && <>
-              <div className="inspect-context"><span className={`status-badge status-badge--${status}`}>{status === 'running' ? 'EN EJECUCIÓN' : status === 'loading' ? 'CREANDO VM' : status === 'error' ? 'ERROR' : status === 'stopped' ? 'DETENIDO' : status === 'paused' ? 'PAUSADO' : status === 'complete' ? 'COMPLETADO' : 'EN ESPERA'}</span><span>{currentStep ? `Línea ${currentStep.line}` : 'Sin paso activo'}</span></div>
-              {currentStep?.operationId && currentStep.operationValue !== undefined && <div className="operation-value-card"><span>RESULTADO DE OPERACIÓN</span>{activeOperation?.data.expression && <code>{activeOperation.data.expression}</code>}<pre>{formatValue(currentStep.operationValue)}</pre></div>}
-              <label className="variable-search"><Search aria-hidden="true" /><input value={variableQuery} onChange={(event) => setVariableQuery(event.target.value)} placeholder="Buscar variable..." aria-label="Buscar variables" /></label>
-              {visibleVariables.length ? <div className="variable-list" role="list" aria-label="Variables del paso actual">
-                {visibleVariables.map(([name, value]) => <div className="variable-card" role="listitem" key={name}><div className="variable-card__top"><span className="variable-name">{name}</span><span className={`value-type value-type--${valueKind(value)}`}>{valueKind(value)}</span></div><pre className="variable-value">{formatValue(value)}</pre></div>)}
-              </div> : <div className="inspector-empty"><Variable aria-hidden="true" /><strong>{trace.length ? 'Sin variables visibles' : 'Estado vacío'}</strong><span>{trace.length ? 'Este paso no tiene variables locales.' : 'La salida aparece en Consola; esta versión no captura variables ni pila de llamadas.'}</span></div>}
-              {currentStep?.returnValue !== undefined && <div className="return-value-card"><span>VALOR DE RETORNO</span><pre>{formatValue(currentStep.returnValue)}</pre></div>}
-              {currentStep && <div className="memory-estimate"><span>Huella lógica del snapshot</span><strong>{formatBytes(new TextEncoder().encode(JSON.stringify(currentStep.locals)).length)}</strong><small>Estimación serializada, no uso real del heap.</small></div>}
-              <div className="inspector-footnote"><span className="inspector-pulse" />Sin valores dinámicos · análisis estático</div>
-            </>}
-            {inspectorTab === 'stack' && <>
-              <div className="inspect-section-title">Pila de llamadas <span>{currentStep?.stack.length ?? 0}</span></div>
-              {currentStep?.stack.length ? <div className="call-stack" role="list">{[...currentStep.stack].reverse().map((name, index) => <div className={`stack-row ${index === 0 ? 'is-current' : ''}`} role="listitem" key={`${name}-${index}`}><span className="stack-index">{String(index + 1).padStart(2, '0')}</span><Braces aria-hidden="true" /><span>{name}</span>{index === 0 && <span className="stack-current">actual</span>}</div>)}</div> : <div className="inspector-empty"><ListTree aria-hidden="true" /><strong>Sin traza de llamadas</strong><span>El runner ejecuta el archivo completo sin instrumentar la pila.</span></div>}
-              <div className="runtime-note"><strong>Entorno:</strong> Vercel Sandbox<br /><strong>Red:</strong> bloqueada</div>
-            </>}
-            {inspectorTab === 'history' && <>
-              <div className="history-heading"><span>Últimas ejecuciones</span><span>{snapshots.length}/8</span></div>
-              <p className="history-instructions">Se guardan hasta ocho salidas en esta pestaña. No se capturan variables ni snapshots de pasos.</p>
-              <div className="history-list">
-                {snapshots.length ? snapshots.map((snapshot, index) => <div className={`history-card ${selectedSnapshots.includes(snapshot.id) ? 'is-compared' : ''}`} key={snapshot.id}>
-                  <button type="button" className="history-card__open" onClick={() => selectSnapshot(snapshot)} aria-label={`Abrir ejecución ${index + 1}`} disabled={isRuntimeBusy}>
-                    <span className="history-card__index">{String(snapshots.length - index).padStart(2, '0')}</span><span className="history-card__details"><strong>{snapshot.fileName.split('/').at(-1)}</strong><span>{new Date(snapshot.createdAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · {snapshot.output.length} bloques de salida</span></span><ArrowRight aria-hidden="true" />
-                  </button>
-                  <button type="button" className="history-compare" onClick={() => toggleSnapshotSelection(snapshot.id)} aria-label={`${selectedSnapshots.includes(snapshot.id) ? 'Quitar' : 'Comparar'} ejecución ${index + 1}`} aria-pressed={selectedSnapshots.includes(snapshot.id)}><Check aria-hidden="true" /></button>
-                </div>) : <div className="inspector-empty"><Clock3 aria-hidden="true" /><strong>Sin ejecuciones todavía</strong><span>Ejecuta el archivo para guardar su salida en este historial local.</span></div>}
+              <div className="cf-project-row">
+                <APP_ICONS.files aria-hidden="true" />
+                <span className="cf-project-row__name">{projectName}</span>
+                <span className="cf-project-row__count">{files.length}</span>
               </div>
-              {comparedSnapshots.length === 2 && <SnapshotComparison snapshots={comparedSnapshots} />}
-            </>}
-          </div>
-          {selectedNode && <div className="node-inspector"><div className="node-inspector__title"><span>NODO SELECCIONADO</span><button type="button" aria-label="Cerrar inspector de nodo" onClick={() => setSelectedNodeId(null)}><X aria-hidden="true" /></button></div><div className="node-inspector__name">{selectedNode.data.label}</div><div className="node-inspector__meta">Línea {selectedNode.data.line} · {selectedNode.data.detail.split(' · ')[0]}</div><textarea aria-label="Editar línea de origen" value={sourceEdit} onChange={(event) => setSourceEdit(event.target.value)} rows={2} />{historicalView ? <p className="historical-source-note">Este snapshot es de solo lectura.</p> : (activeFile.code.split('\n')[selectedNode.data.line - 1] ?? '') !== sourceLineOriginal && <div className="source-conflict" role="alert"><span>El editor modificó esta línea desde que abriste el nodo.</span><Button variant="ghost" size="sm" onClick={() => { const currentLine = activeFile.code.split('\n')[selectedNode.data.line - 1] ?? ''; setSourceLineOriginal(currentLine); setSourceEdit(currentLine) }}>Cargar línea actual</Button></div>}<Button variant="secondary" size="sm" onClick={applySourceEdit} disabled={Boolean(historicalView)}><Check data-icon="inline-start" aria-hidden="true" />Aplicar al código</Button></div>}
-        </aside>
-      </div>
-
-      <section className="bottom-dock" aria-label="Consola y reproducción">
-        <div className="dock-topline">
-          <div className="dock-tabs" role="tablist" aria-label="Salida del programa">
-            <button role="tab" aria-selected={bottomTab === 'console'} className={bottomTab === 'console' ? 'is-active' : ''} onClick={() => setBottomTab('console')}><Terminal aria-hidden="true" />Consola<span className="dock-count">{logs.length}</span></button>
-            <button role="tab" aria-selected={bottomTab === 'trace'} className={bottomTab === 'trace' ? 'is-active' : ''} onClick={() => setBottomTab('trace')}><Activity aria-hidden="true" />Reproducción<span className="dock-count">{trace.length}</span></button>
-          </div>
-          <div className="dock-actions">
-            {notice && <span className="run-notice" title={notice}><span className={`notice-dot notice-dot--${status}`} />{notice}</span>}
-            {bottomTab === 'console' ? <Button variant="ghost" size="icon-xs" aria-label="Limpiar consola" title="Limpiar consola" onClick={clearConsole}><Trash2 aria-hidden="true" /></Button> : <>
-              <label className="speed-control"><span>Velocidad</span><input type="range" min="0.5" max="2.5" step="0.5" value={speed} onChange={(event) => setSpeed(Number(event.target.value))} aria-label="Velocidad de reproducción" disabled={!trace.length} /><span>{speed}×</span></label>
-              <div className="step-controls">
-                <Button variant="ghost" size="icon-xs" aria-label="Primer paso" title="Primer paso" disabled={!trace.length} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(0) }}><SkipBack aria-hidden="true" /></Button>
-                <Button variant="ghost" size="icon-xs" aria-label="Paso anterior" title="Paso anterior" disabled={!trace.length || activeStep <= 0} onClick={() => stepBy(-1)}><ArrowLeft aria-hidden="true" /></Button>
-                <Button variant="ghost" size="icon-xs" className="playback-toggle" aria-label={isPlaying ? 'Pausar reproducción' : 'Reproducir pasos'} title={isPlaying ? 'Pausar' : 'Reproducir'} disabled={!trace.length || status === 'running' || status === 'loading'} onClick={togglePlayback}>{isPlaying ? <Square aria-hidden="true" /> : <Play aria-hidden="true" />}</Button>
-                <Button variant="ghost" size="icon-xs" aria-label="Paso siguiente" title="Paso siguiente" disabled={!trace.length || activeStep >= trace.length - 1} onClick={() => stepBy(1)}><ArrowRight aria-hidden="true" /></Button>
-                <Button variant="ghost" size="icon-xs" aria-label="Último paso" title="Último paso" disabled={!trace.length} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(trace.length - 1) }}><SkipForward aria-hidden="true" /></Button>
+              <label className="cf-search">
+                <Search aria-hidden="true" />
+                <input
+                  ref={fileSearchRef}
+                  value={fileFilter}
+                  onChange={(event) => setFileFilter(event.target.value)}
+                  placeholder="Filtrar archivos"
+                  aria-label="Filtrar archivos"
+                />
+                <kbd>⌘P</kbd>
+              </label>
+              <div className="cf-file-list" role="list" aria-label="Archivos">
+                {filteredFiles.map((file) => (
+                  <div className={`cf-file-row ${activeFileId === file.id ? 'is-active' : ''}`} role="listitem" key={file.id}>
+                    <button
+                      className="cf-file-row__main"
+                      type="button"
+                      onClick={() => openFile(file.id)}
+                      aria-current={activeFileId === file.id ? 'true' : undefined}
+                      disabled={isRuntimeBusy}
+                    >
+                      <span className={`cf-language-mark cf-language-mark--${file.language}`} aria-hidden="true">
+                        {LANGUAGE_DEFINITIONS[file.language].mark}
+                      </span>
+                      <span className="cf-file-row__name">{baseName(file.name)}</span>
+                    </button>
+                    <Menu>
+                      <MenuTrigger
+                        render={<Button variant="ghost" size="icon-xs" />}
+                        className="cf-file-row__menu"
+                        aria-label={`Acciones de ${file.name}`}
+                        title="Acciones"
+                      >
+                        <APP_ICONS.more aria-hidden="true" />
+                      </MenuTrigger>
+                      <MenuContent align="end">
+                        <MenuItem icon={APP_ICONS.rename} onClick={() => setDialog({ kind: 'rename-file', file })}>Renombrar…</MenuItem>
+                        <MenuItem icon={APP_ICONS.duplicate} onClick={() => duplicateFile(file)}>Duplicar</MenuItem>
+                        <MenuSeparator />
+                        <MenuItem icon={APP_ICONS.delete} destructive onClick={() => removeFile(file.id)} disabled={files.length <= 1}>Eliminar</MenuItem>
+                      </MenuContent>
+                    </Menu>
+                  </div>
+                ))}
+                {filteredFiles.length === 0 && <p className="cf-empty-inline">No se encontraron archivos</p>}
               </div>
-            </>}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={`${acceptedFileExtensions()},.codeflow.json`}
+                multiple
+                className="visually-hidden"
+                onChange={(event) => void importFiles(event.target.files)}
+                aria-label="Seleccionar archivos para importar"
+              />
+            </aside>
+
+            <section className={`cf-panel cf-editor ${mobilePane === 'editor' ? 'is-mobile-active' : ''}`} aria-label="Editor de código">
+              <div className="cf-pane-header">
+                <div className="cf-pane-title">
+                  <APP_ICONS.code aria-hidden="true" />
+                  <span className="cf-pane-title__file">{baseName(displayFileName) || 'Sin archivo'}</span>
+                  {historicalView && <span className="cf-chip cf-chip--warning">Solo lectura</span>}
+                </div>
+                <div className="cf-pane-header__actions">
+                  {historicalView ? (
+                    <Button variant="ghost" size="sm" onClick={() => setHistoricalView(null)}>Volver al archivo</Button>
+                  ) : (
+                    <Menu>
+                      <MenuTrigger
+                        render={<Button variant="ghost" size="sm" />}
+                        className="cf-language-trigger"
+                        aria-label={`Lenguaje: ${LANGUAGE_DEFINITIONS[displayLanguage].label}. Cambiar lenguaje`}
+                        title="Lenguaje del archivo"
+                      >
+                        <span className={`cf-language-mark cf-language-mark--${displayLanguage}`} aria-hidden="true">
+                          {LANGUAGE_DEFINITIONS[displayLanguage].mark}
+                        </span>
+                        <span className="cf-language-trigger__label">{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
+                        <APP_ICONS.chevronDown aria-hidden="true" />
+                      </MenuTrigger>
+                      <MenuContent align="end" className="cf-menu--languages">
+                        <MenuRadioGroup value={displayLanguage} onValueChange={(value) => changeLanguage(value as Language)}>
+                          <MenuGroupLabel>Lenguaje del archivo</MenuGroupLabel>
+                          {SUPPORTED_LANGUAGES.map((language) => (
+                            <MenuRadioItem
+                              key={language}
+                              value={language}
+                              leading={<span className={`cf-language-mark cf-language-mark--${language}`} aria-hidden="true">{LANGUAGE_DEFINITIONS[language].mark}</span>}
+                            >
+                              <span className="cf-menu__stack">
+                                <span className="cf-menu__label">{LANGUAGE_DEFINITIONS[language].label}</span>
+                                <span className="cf-menu__hint">{LANGUAGE_DEFINITIONS[language].runtimeName}</span>
+                              </span>
+                            </MenuRadioItem>
+                          ))}
+                        </MenuRadioGroup>
+                      </MenuContent>
+                    </Menu>
+                  )}
+                </div>
+              </div>
+              <div className="cf-editor__surface">
+                {activeFile ? (
+                  <CodeEditor
+                    key={`${activeFile.id}-${displayLanguage}-${historicalView?.id ?? 'current'}`}
+                    height="100%"
+                    language={LANGUAGE_DEFINITIONS[displayLanguage].monacoLanguage}
+                    value={displayCode}
+                    onChange={(value) => updateActiveCode(value ?? '')}
+                    onMount={handleEditorMount}
+                    theme={isDark ? 'codeflow-graphite' : 'codeflow-paper'}
+                    options={{
+                      automaticLayout: true,
+                      glyphMargin: false,
+                      lineNumbers: 'on',
+                      lineNumbersMinChars: 3,
+                      folding: true,
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'off',
+                      tabSize: LANGUAGE_DEFINITIONS[displayLanguage].tabSize,
+                      insertSpaces: true,
+                      suggestOnTriggerCharacters: true,
+                      quickSuggestions: true,
+                      accessibilitySupport: 'auto',
+                      readOnly: isRuntimeBusy || Boolean(historicalView),
+                    }}
+                  />
+                ) : (
+                  <p className="cf-empty-inline cf-empty-inline--center">No hay archivos en este proyecto.</p>
+                )}
+              </div>
+              <footer className="cf-editor__footer">
+                <span>{lineCount} líneas</span>
+                <span>{LANGUAGE_DEFINITIONS[displayLanguage].label}</span>
+                <span>UTF-8</span>
+                <span>Espacios: {LANGUAGE_DEFINITIONS[displayLanguage].tabSize}</span>
+              </footer>
+            </section>
+
+            <section className={`cf-panel cf-diagram ${mobilePane === 'diagram' ? 'is-mobile-active' : ''}`} aria-label="Diagrama del código">
+              <div className="cf-pane-header">
+                <div className="cf-pane-title">
+                  <APP_ICONS.flow aria-hidden="true" />
+                  <span>Flujo</span>
+                  <span className="cf-count">{graph.nodes.length} nodos</span>
+                </div>
+                <div className="cf-pane-header__actions">
+                  <span className="cf-static-badge">Análisis estático</span>
+                  <Menu>
+                    <MenuTrigger
+                      render={<Button variant="ghost" size="icon-xs" />}
+                      className="cf-icon-button"
+                      aria-label="Acciones del diagrama"
+                      title="Acciones del diagrama"
+                    >
+                      <APP_ICONS.more aria-hidden="true" />
+                    </MenuTrigger>
+                    <MenuContent align="end">
+                      <MenuItem icon={APP_ICONS.exportDiagram} onClick={exportDiagram}>Exportar diagrama</MenuItem>
+                      <MenuItem icon={APP_ICONS.delete} onClick={() => { setManualEdges([]); setNotice('Conexiones visuales eliminadas.') }} disabled={!manualEdges.length}>
+                        Quitar conexiones visuales
+                      </MenuItem>
+                    </MenuContent>
+                  </Menu>
+                </div>
+              </div>
+              <div className="cf-diagram__surface">
+                <FlowCanvas
+                  graph={graph}
+                  manualEdges={manualEdges}
+                  activeLine={null}
+                  activeOperationId={null}
+                  onSelectNode={(nodeId) => { recordProgress({ type: 'explore', feature: 'diagram' }); openLine(nodeId) }}
+                  onManualEdgesChange={setManualEdges}
+                  onConnectNodes={(count) => setNotice(`Conexiones visuales: ${count}. Las flechas son anotaciones del diagrama.`)}
+                />
+              </div>
+              <footer className="cf-legend">
+                <span><span className="cf-legend__shape cf-legend__shape--terminator" />Inicio / fin</span>
+                <span><span className="cf-legend__shape cf-legend__shape--process" />Proceso</span>
+                <span><span className="cf-legend__shape cf-legend__shape--decision" />Decisión</span>
+                <span><span className="cf-legend__shape cf-legend__shape--io" />Entrada / salida</span>
+                <span><span className="cf-legend__shape cf-legend__shape--connector" />Conector</span>
+              </footer>
+            </section>
+
+            <aside className={`cf-panel cf-inspector ${mobilePane === 'inspector' ? 'is-mobile-active' : ''}`} aria-label="Inspector">
+              {selectedNode ? (
+                <NodeInspector
+                  label={selectedNode.data.label}
+                  kindLabel={selectedNode.data.kind === 'operation' && selectedNode.data.operationCategory
+                    ? OPERATION_LABELS[selectedNode.data.operationCategory]
+                    : NODE_LABELS[selectedNode.data.kind]}
+                  line={selectedNode.data.line}
+                  detail={selectedNode.data.detail.split(' · ')[0]}
+                  value={sourceEdit}
+                  onChange={setSourceEdit}
+                  onApply={applySourceEdit}
+                  onClose={() => setSelectedNodeId(null)}
+                  readOnly={Boolean(historicalView)}
+                  conflicted={Boolean(activeFile) && (activeFile!.code.split('\n')[selectedNode.data.line - 1] ?? '') !== sourceLineOriginal}
+                  onReloadLine={() => {
+                    const currentLine = activeFile?.code.split('\n')[selectedNode.data.line - 1] ?? ''
+                    setSourceLineOriginal(currentLine)
+                    setSourceEdit(currentLine)
+                  }}
+                />
+              ) : (
+                <>
+                  <div className="cf-pane-header">
+                    <h2 className="cf-pane-title"><APP_ICONS.inspector aria-hidden="true" />Inspector</h2>
+                  </div>
+                  <div className="cf-tabs" role="tablist" aria-label="Panel del inspector">
+                    <button
+                      type="button"
+                      role="tab"
+                      id="cf-tab-symbols"
+                      aria-selected={inspectorTab === 'symbols'}
+                      aria-controls="cf-panel-inspector"
+                      className={inspectorTab === 'symbols' ? 'is-active' : ''}
+                      onClick={() => { setInspectorTab('symbols'); recordProgress({ type: 'inspector', tab: 'symbols' }) }}
+                      onKeyDown={moveInspectorTab}
+                    >
+                      <APP_ICONS.symbols aria-hidden="true" />
+                      Símbolos
+                      <span className="cf-count">{graph.nodes.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="cf-tab-history"
+                      aria-selected={inspectorTab === 'history'}
+                      aria-controls="cf-panel-inspector"
+                      className={inspectorTab === 'history' ? 'is-active' : ''}
+                      onClick={() => { setInspectorTab('history'); recordProgress({ type: 'inspector', tab: 'history' }) }}
+                      onKeyDown={moveInspectorTab}
+                    >
+                      <APP_ICONS.history aria-hidden="true" />
+                      Historial
+                      <span className="cf-count">{snapshots.length}</span>
+                    </button>
+                  </div>
+                  <div className="cf-panel__body" role="tabpanel" id="cf-panel-inspector" aria-labelledby={inspectorTab === 'symbols' ? 'cf-tab-symbols' : 'cf-tab-history'}>
+                    {inspectorTab === 'symbols' ? (
+                      <SymbolList graph={graph} onSelect={openLine} />
+                    ) : (
+                      <HistoryList
+                        snapshots={snapshots}
+                        selectedSnapshots={selectedSnapshots}
+                        onOpen={selectSnapshot}
+                        onToggleCompare={toggleSnapshotSelection}
+                        compared={comparedSnapshots}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </aside>
           </div>
+
+          <ConsolePanel
+            logs={logs}
+            status={status}
+            notice={notice}
+            collapsed={consoleCollapsed}
+            onToggleCollapsed={() => setConsoleCollapsed((current) => !current)}
+            onClear={clearConsole}
+          />
+
+          <nav className="cf-mobile-nav" aria-label="Vistas del editor">
+            <button type="button" className={mobilePane === 'files' ? 'is-active' : ''} aria-current={mobilePane === 'files' ? 'page' : undefined} onClick={() => setMobilePane('files')}>
+              <APP_ICONS.files aria-hidden="true" />Archivos
+            </button>
+            <button type="button" className={mobilePane === 'editor' ? 'is-active' : ''} aria-current={mobilePane === 'editor' ? 'page' : undefined} onClick={() => setMobilePane('editor')}>
+              <APP_ICONS.code aria-hidden="true" />Código
+            </button>
+            <button type="button" className={mobilePane === 'diagram' ? 'is-active' : ''} aria-current={mobilePane === 'diagram' ? 'page' : undefined} onClick={() => setMobilePane('diagram')}>
+              <APP_ICONS.flow aria-hidden="true" />Flujo
+            </button>
+            <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} aria-current={mobilePane === 'inspector' ? 'page' : undefined} onClick={() => setMobilePane('inspector')}>
+              <APP_ICONS.inspector aria-hidden="true" />Inspector
+            </button>
+          </nav>
+
+          <footer className="cf-statusbar">
+            <span className="cf-statusbar__status">
+              <span className={`cf-status-dot cf-status-dot--${status}`} aria-hidden="true" />
+              {status === 'loading' || status === 'running'
+                ? 'Ejecutando en microVM'
+                : status === 'error'
+                  ? 'Error de ejecución'
+                  : status === 'stopped'
+                    ? 'Ejecución detenida'
+                    : status === 'complete'
+                      ? 'Ejecución completada'
+                      : 'Runtime aislado'}
+            </span>
+            <span className="cf-statusbar__right">
+              {LANGUAGE_DEFINITIONS[displayLanguage].analyzerName}
+              <span aria-hidden="true">·</span>
+              {graph.nodes.length} símbolos de flujo
+            </span>
+          </footer>
+        </>
+      )}
+
+      {achievementToasts[0] && (
+        <div className="cf-toast" role="status" aria-live="polite">
+          <span className="cf-toast__icon"><APP_ICONS.trophy aria-hidden="true" /></span>
+          <span className="cf-toast__body">
+            <small>LOGRO DESBLOQUEADO · +{achievementToasts[0].xp} XP</small>
+            <strong>{achievementToasts[0].name}</strong>
+          </span>
+          <button type="button" aria-label="Cerrar notificación" onClick={() => setAchievementToasts((current) => current.slice(1))}>
+            <X aria-hidden="true" />
+          </button>
         </div>
-        {bottomTab === 'console' ? <div className="console-body" role="log" aria-live="polite" aria-label="Salida de consola">
-          {logs.length ? logs.map((entry, index) => <div className={`console-line ${entry.stream === 'stderr' ? 'console-line--error' : ''}`} key={`${index}-${entry.stream}`}><span className="console-prompt">{entry.stream === 'stderr' ? '!' : '›'}</span><span>{entry.text}</span></div>) : status === 'complete' ? <div className="console-empty"><Terminal aria-hidden="true" /> Ejecución completada sin salida.</div> : <div className="console-empty"><Terminal aria-hidden="true" /> Ejecuta con <kbd>⌘ Enter</kbd> o el botón. Cada proceso corre en una microVM efímera, sin acceso a red.</div>}
-        </div> : <div className="trace-body">
-          <input className="trace-scrubber" type="range" min={0} max={Math.max(trace.length - 1, 0)} step={1} value={Math.max(activeStep, 0)} disabled={!trace.length || isRuntimeBusy} aria-label="Buscar paso de ejecución" aria-valuetext={currentStep ? `Paso ${activeStep + 1} de ${trace.length} · línea ${currentStep.line}` : 'Sin pasos registrados'} onChange={(event) => { setIsPlaying(false); setStatus('paused'); setActiveStep(Number(event.currentTarget.value)) }} />
-          <div className="trace-summary"><span className="trace-summary__step">{trace.length ? `PASO ${String(Math.max(activeStep + 1, 1)).padStart(2, '0')} / ${String(trace.length).padStart(2, '0')}` : 'SIN REGISTRO'}</span><span className="trace-summary__line">{currentStep ? `Línea ${currentStep.line} · ${displayFileName}` : 'El runner no captura pasos por línea'}</span><span className="trace-summary__origin">{currentStep?.operationId ? 'resultado de operación' : 'sin instrumentación de línea'}</span></div>
-          {visibleTrace.length > 0 && <div className="trace-ticks" aria-label="Pasos capturados">{visibleTrace.map(({ step, index }) => <button key={step.id} type="button" aria-label={step.operationId ? `Ir a la operación ${step.id}, línea ${step.line}` : `Ir al paso ${step.id}, línea ${step.line}`} title={step.operationId ? `Operación ${step.id} · línea ${step.line}` : `Paso ${step.id} · línea ${step.line}`} className={`trace-tick ${index === activeStep ? 'is-active' : ''}`} onClick={() => { setIsPlaying(false); setStatus('paused'); setActiveStep(index) }} />)}</div>}
-        </div>}
-      </section>
+      )}
 
-      <nav className="mobile-nav" aria-label="Vistas del editor">
-        <button type="button" className={mobilePane === 'editor' ? 'is-active' : ''} onClick={() => setMobilePane('editor')}><Code2 aria-hidden="true" />Código</button>
-        <button type="button" className={mobilePane === 'diagram' ? 'is-active' : ''} onClick={() => setMobilePane('diagram')}><GitBranch aria-hidden="true" />Flujo</button>
-        <button type="button" className={mobilePane === 'inspector' ? 'is-active' : ''} onClick={() => setMobilePane('inspector')}><PanelRight aria-hidden="true" />Inspector</button>
-      </nav>
-
-      <footer className="statusbar"><span><span className={`statusbar-dot statusbar-dot--${status}`} />{status === 'loading' || status === 'running' ? 'Ejecutando en microVM' : status === 'error' ? 'Error de ejecución' : status === 'stopped' ? 'Ejecución detenida' : status === 'complete' ? 'Ejecución completada' : 'Runtime aislado'}</span><span>Sin red · 15 s compilación · 8 s ejecución · salida 16 KB máx.</span><span>{graph.nodes.length} símbolos de flujo</span><span className="statusbar-right">{getLanguageDefinition(displayLanguage).analyzerName}<span>·</span> UTF-8</span></footer>
-      </>}
-      {achievementToasts[0] && <div className="achievement-toast" role="status" aria-live="polite"><span className="achievement-toast__icon"><Trophy aria-hidden="true" /></span><span><small>LOGRO DESBLOQUEADO · +{achievementToasts[0].xp} XP</small><strong>{achievementToasts[0].name}</strong></span><button type="button" aria-label="Cerrar notificación" onClick={() => setAchievementToasts((current) => current.slice(1))}><X aria-hidden="true" /></button></div>}
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
+
+      <NewFileDialog
+        open={dialog.kind === 'new-file'}
+        initialLanguage={activeFile?.language ?? 'javascript'}
+        onClose={() => setDialog({ kind: 'none' })}
+        onConfirm={createNewFile}
+      />
+      <NameDialog
+        open={dialog.kind === 'rename-file'}
+        title="Renombrar archivo"
+        description="El nombre incluye la carpeta y la extensión del archivo."
+        label="Nombre"
+        initialValue={dialog.kind === 'rename-file' ? dialog.file.name : ''}
+        confirmLabel="Renombrar"
+        onClose={() => setDialog({ kind: 'none' })}
+        onConfirm={(name) => { if (dialog.kind === 'rename-file') renameFile(dialog.file.id, name) }}
+      />
+      <NameDialog
+        open={dialog.kind === 'rename-project'}
+        title="Renombrar proyecto"
+        description="El nombre se usa al exportar el proyecto CodeFlow."
+        label="Nombre del proyecto"
+        initialValue={projectName}
+        confirmLabel="Renombrar"
+        onClose={() => setDialog({ kind: 'none' })}
+        onConfirm={renameProject}
+      />
     </main>
+  )
+}
+
+interface SymbolListProps {  graph: ReturnType<typeof analyzeCode>
+  onSelect: (nodeId: string) => void
+}
+
+/** Lista de símbolos del archivo actual. Cada fila salta a su línea en el editor. */
+function SymbolList({ graph, onSelect }: SymbolListProps) {
+  const nodes = [...graph.nodes].sort((left, right) => left.data.line - right.data.line)
+  if (!nodes.length) {
+    return (
+      <div className="cf-empty">
+        <APP_ICONS.symbols aria-hidden="true" />
+        <strong>Sin símbolos</strong>
+        <span>El analizador no encontró funciones, condiciones ni bloques en este archivo.</span>
+      </div>
+    )
+  }
+  return (
+    <ul className="cf-symbol-list">
+      {nodes.map((node) => {
+        const Icon = NODE_ICONS[node.data.kind]
+        const typeLabel = node.data.kind === 'operation' && node.data.operationCategory
+          ? OPERATION_LABELS[node.data.operationCategory]
+          : NODE_LABELS[node.data.kind]
+        return (
+          <li key={node.id}>
+            <button type="button" className="cf-symbol" onClick={() => onSelect(node.id)}>
+              <span className={`cf-symbol__icon cf-symbol__icon--${node.data.kind}`} aria-hidden="true"><Icon /></span>
+              <span className="cf-symbol__body">
+                <span className="cf-symbol__label">{node.data.label}</span>
+                <span className="cf-symbol__type">{typeLabel}</span>
+              </span>
+              <span className="cf-symbol__line">L{node.data.line}</span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+interface HistoryListProps {
+  snapshots: RunSnapshot[]
+  selectedSnapshots: string[]
+  onOpen: (snapshot: RunSnapshot) => void
+  onToggleCompare: (id: string) => void
+  compared: RunSnapshot[]
+}
+
+/** Historial de ejecuciones guardadas en esta sesión, con comparación de salida. */
+function HistoryList({ snapshots, selectedSnapshots, onOpen, onToggleCompare, compared }: HistoryListProps) {
+  if (!snapshots.length) {
+    return (
+      <div className="cf-empty">
+        <APP_ICONS.history aria-hidden="true" />
+        <strong>Sin ejecuciones todavía</strong>
+        <span>Ejecuta el archivo para guardar aquí su salida, hasta ocho veces.</span>
+      </div>
+    )
+  }
+  return (
+    <>
+      <ul className="cf-history-list">
+        {snapshots.map((snapshot, index) => (
+          <li key={snapshot.id} className={`cf-history-row ${selectedSnapshots.includes(snapshot.id) ? 'is-compared' : ''}`}>
+            <button type="button" className="cf-history-row__open" onClick={() => onOpen(snapshot)} disabled={false}>
+              <span className="cf-history-row__index">{String(snapshots.length - index).padStart(2, '0')}</span>
+              <span className="cf-history-row__body">
+                <strong>{baseName(snapshot.fileName)}</strong>
+                <span>
+                  {new Date(snapshot.createdAt).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
+                  {' · '}
+                  {snapshot.output.length} bloques de salida
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="cf-history-row__compare"
+              onClick={() => onToggleCompare(snapshot.id)}
+              aria-label={`${selectedSnapshots.includes(snapshot.id) ? 'Quitar de' : 'Añadir a'} la comparación`}
+              aria-pressed={selectedSnapshots.includes(snapshot.id)}
+              title="Comparar salidas"
+            >
+              <APP_ICONS.copy aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {compared.length === 2 && <SnapshotComparison snapshots={compared} />}
+    </>
+  )
+}
+
+interface NodeInspectorProps {
+  label: string
+  kindLabel: string
+  line: number
+  detail: string
+  value: string
+  onChange: (value: string) => void
+  onApply: () => void
+  onClose: () => void
+  onReloadLine: () => void
+  readOnly: boolean
+  conflicted: boolean
+}
+
+/** Detalle del nodo seleccionado con edición de la línea de origen. */
+function NodeInspector({
+  label,
+  kindLabel,
+  line,
+  detail,
+  value,
+  onChange,
+  onApply,
+  onClose,
+  onReloadLine,
+  readOnly,
+  conflicted,
+}: NodeInspectorProps) {
+  return (
+    <div className="cf-node-inspector">
+      <div className="cf-pane-header">
+        <h2 className="cf-pane-title"><APP_ICONS.flow aria-hidden="true" />Nodo seleccionado</h2>
+        <Button variant="ghost" size="icon-xs" aria-label="Cerrar inspector de nodo" title="Cerrar" onClick={onClose}>
+          <X aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="cf-node-inspector__body">
+        <span className="cf-chip">{kindLabel}</span>
+        <p className="cf-node-inspector__name">{label}</p>
+        <p className="cf-node-inspector__meta">Línea {line} · {detail}</p>
+        <label className="cf-field">
+          <span className="cf-field__label">Línea de origen</span>
+          <textarea
+            className="cf-field__input cf-field__input--code"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            rows={3}
+            spellCheck={false}
+            readOnly={readOnly}
+          />
+        </label>
+        {readOnly ? (
+          <p className="cf-node-inspector__note">Este snapshot es de solo lectura.</p>
+        ) : conflicted ? (
+          <div className="cf-conflict" role="alert">
+            <span>El editor modificó esta línea desde que abriste el nodo.</span>
+            <Button variant="ghost" size="sm" onClick={onReloadLine}>Cargar línea actual</Button>
+          </div>
+        ) : null}
+        <Button variant="default" size="sm" onClick={onApply} disabled={readOnly}>Aplicar al código</Button>
+      </div>
+    </div>
   )
 }
 
@@ -821,13 +1394,18 @@ function SnapshotComparison({ snapshots }: { snapshots: RunSnapshot[] }) {
   const [left, right] = snapshots
   const formatOutput = (snapshot: RunSnapshot) => snapshot.output.map((entry) => `[${entry.stream}] ${entry.text}`).join('')
 
-  return <div className="snapshot-comparison">
-    <div className="snapshot-comparison__heading"><Copy aria-hidden="true" />Comparación de salidas</div>
-    <div className="snapshot-comparison__files"><span>{left.fileName.split('/').at(-1)}</span><ArrowRight aria-hidden="true" /><span>{right.fileName.split('/').at(-1)}</span></div>
-    <div className="execution-output-comparison">
-      <pre>{formatOutput(left) || 'Sin salida'}</pre>
-      <ArrowRight aria-hidden="true" />
-      <pre>{formatOutput(right) || 'Sin salida'}</pre>
+  return (
+    <div className="cf-comparison">
+      <div className="cf-comparison__heading"><APP_ICONS.copy aria-hidden="true" />Comparación de salidas</div>
+      <div className="cf-comparison__files">
+        <span>{baseName(left.fileName)}</span>
+        <span aria-hidden="true">→</span>
+        <span>{baseName(right.fileName)}</span>
+      </div>
+      <div className="cf-comparison__grid">
+        <pre>{formatOutput(left) || 'Sin salida'}</pre>
+        <pre>{formatOutput(right) || 'Sin salida'}</pre>
+      </div>
     </div>
-  </div>
+  )
 }
