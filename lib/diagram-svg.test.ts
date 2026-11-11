@@ -79,4 +79,33 @@ describe('exportación del diagrama', () => {
     expect(svg).not.toContain('<b>')
     expect(svg).toContain('&lt;b&gt;')
   })
+
+  it('dibuja la silueta de las decisiones y de las entradas', () => {
+    const graph = analyzeCode('if (a < b) { print(a) } else { print(b) }\n', 'javascript')
+    const svg = buildDiagramSvg(graph.nodes, graph.edges, { palette, title: 'Diagrama' })
+
+    // La silueta es un trazado: una lista de puntos inválida deja el nodo invisible.
+    expect(svg).not.toContain('points="M')
+    expect(svg).toMatch(/<path d="M [\d.]+ 0 L [\d.]+ [\d.]+ L [\d.]+ [\d.]+ L 0 [\d.]+ Z"/)
+    expect(svg).toContain('CONDICIÓN')
+  })
+
+  it('no deja formas ni textos a medias', () => {
+    const graph = analyzeCode('function total(a) {\n  let sum = 0\n  for (const item of a) sum += item\n  return sum\n}\n', 'javascript')
+    const svg = buildDiagramSvg(graph.nodes, graph.edges, { palette, title: 'Diagrama' })
+
+    expect(svg).not.toMatch(/<(path|rect|circle|text|polygon)\b[^>]*\s(d|points)=""/)
+    expect(svg).not.toMatch(/<text[^>]*><\/text>/)
+    expect(svg).toContain('BUCLE')
+  })
+
+  it('omite los metadatos que el lienzo tampoco muestra', () => {
+    const graph = analyzeCode('if (a < b) { print(a) } else { print(b) }\n', 'javascript')
+    const svg = buildDiagramSvg(graph.nodes, graph.edges, { palette, title: 'Diagrama' })
+    const connector = graph.nodes.find((node) => node.data.kind === 'connector')
+
+    // El conector solo enseña su letra: sin tipo ni número de línea.
+    expect(connector).toBeDefined()
+    expect(svg).not.toContain('CONECTOR')
+  })
 })

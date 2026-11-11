@@ -1,6 +1,6 @@
 import type { FlowCardData, FlowCardEdge, FlowCardNode, FlowEdgeRole, NodeKind } from '@/lib/codeflow-types'
 import { getFlowNodeSize } from '@/lib/flow-routing'
-import { resolveNodeShape } from '@/components/codeflow/node-kinds'
+import { NODE_LABELS, OPERATION_LABELS, resolveNodeShape } from '@/components/codeflow/node-kinds'
 
 /**
  * Paleta con la que se dibuja un diagrama exportado. Se resuelve desde los
@@ -121,6 +121,22 @@ function nodeOutline(shape: string, width: number, height: number): string {
   return ''
 }
 
+/** Nombre legible del tipo de nodo, el mismo que usa el lienzo. */
+function nodeTypeLabel(data: FlowCardData): string {
+  if (data.kind === 'operation' && data.operationCategory) return OPERATION_LABELS[data.operationCategory]
+  return NODE_LABELS[data.kind]
+}
+
+/** Rango de líneas que ocupa el nodo, como en el inspector. */
+function nodeLineLabel(data: FlowCardData): string {
+  return data.lineEnd && data.lineEnd > data.line ? `L${data.line}–${data.lineEnd}` : `L${data.line}`
+}
+
+/**
+ * Dibuja un nodo con la misma silueta que en el lienzo: rombo y paralelogramo
+ * con anillo de acento, cápsula para los finales, círculo para los conectores
+ * y rectángulo redondeado para el resto.
+ */
 function drawNode(node: FlowCardNode, palette: DiagramPalette): string {
   const data = node.data as FlowCardData
   const { width, height } = getFlowNodeSize(node)
@@ -131,32 +147,66 @@ function drawNode(node: FlowCardNode, palette: DiagramPalette): string {
   const parts: string[] = []
 
   if (shape === 'decision' || shape === 'input-output') {
-    parts.push(`<polygon points="${nodeOutline(shape, width, height)}" transform="translate(${x} ${y})" fill="${palette.surface}" stroke="${accent}" stroke-width="1.5" />`)
+    // Anillo de acento con relleno de superficie, igual que en el lienzo.
+    parts.push(`<path d="${nodeOutline(shape, width, height)}" transform="translate(${x} ${y})" fill="${accent}" />`)
+    parts.push(`<path d="${nodeOutline(shape, width - 2, height - 2)}" transform="translate(${x + 1} ${y + 1})" fill="${palette.surface}" />`)
   } else if (shape === 'connector') {
     parts.push(`<circle cx="${x + width / 2}" cy="${y + height / 2}" r="${Math.min(width, height) / 2 - 1}" fill="${palette.surface}" stroke="${accent}" stroke-width="1.5" />`)
   } else {
-    const radius = shape === 'terminator' ? height / 2 : 10
+    const radius = shape === 'terminator' ? height / 2 : 6
     parts.push(`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="${palette.surface}" stroke="${palette.border}" stroke-width="1.2" />`)
-    parts.push(`<rect x="${x}" y="${y}" width="4" height="${height}" rx="2" fill="${accent}" opacity="0.85" />`)
   }
 
-  const centered = shape === 'decision' || shape === 'terminator' || shape === 'connector' || shape === 'input-output'
-  const anchor = centered ? 'middle' : 'start'
-  const textX = centered ? x + width / 2 : x + 16
-  const typeY = y + (centered ? height / 2 - 16 : 22)
-  const labelY = typeY + 18
-  const detailY = labelY + 16
-  const maxChars = centered ? Math.floor(width / 6.4) : Math.floor((width - 32) / 6.4)
   const label = typeof data.label === 'string' ? data.label : String(data.label ?? '')
   const detail = typeof data.detail === 'string' ? data.detail : ''
+  const expression = typeof data.expression === 'string' ? data.expression : ''
 
-  parts.push(`<text x="${textX}" y="${typeY}" text-anchor="${anchor}" font-family="${palette.mono}" font-size="10" fill="${accent}" letter-spacing="0.6">${escapeXml(data.kind.toUpperCase())}</text>`)
-  parts.push(`<text x="${textX}" y="${labelY}" text-anchor="${anchor}" font-family="${palette.mono}" font-size="12" fill="${palette.text}">${escapeXml(shorten(label, maxChars))}</text>`)
-  if (!centered && detail) {
-    parts.push(`<text x="${textX}" y="${detailY}" text-anchor="${anchor}" font-family="${palette.font}" font-size="10" fill="${palette.muted}">${escapeXml(shorten(detail, Math.floor(maxChars * 0.9)))}</text>`)
+  // El conector solo enseña su letra: el resto de metadatos estorba.
+  if (shape === 'connector') {
+    parts.push(`<text x="${x + width / 2}" y="${y + height / 2 + 4}" text-anchor="middle" font-family="${palette.mono}" font-size="12" fill="${accent}">${escapeXml(shorten(label, Math.floor(width / 7)))}</text>`)
+    return parts.join('')
   }
-  parts.push(`<text x="${x + width - 10}" y="${y + 18}" text-anchor="end" font-family="${palette.mono}" font-size="9" fill="${palette.muted}">L${data.line}</text>`)
+
+  const centered = shape === 'decision' || shape === 'terminator' || shape === 'input-output'
+  const anchor = centered ? 'middle' : 'start'
+  const textX = centered ? x + width / 2 : x + 14
+  const lineLabel = nodeLineLabel(data)
+  const typeLabel = nodeTypeLabel(data).toUpperCase()
+
+  if (centered) {
+    const typeBaseline = y + height / 2 - (detail ? 20 : 12)
+    parts.push(`<text x="${textX}" y="${typeBaseline}" text-anchor="${anchor}" font-family="${palette.mono}" font-size="9.5" fill="${accent}" letter-spacing="0.4">${escapeXml(`${typeLabel} ${lineLabel}`)}</text>`)
+  } else {
+    parts.push(`<text x="${textX}" y="${y + 22}" text-anchor="start" font-family="${palette.mono}" font-size="9.5" fill="${accent}" letter-spacing="0.4">${escapeXml(typeLabel)}</text>`)
+    parts.push(`<text x="${x + width - 12}" y="${y + 22}" text-anchor="end" font-family="${palette.mono}" font-size="9" fill="${palette.muted}">${escapeXml(lineLabel)}</text>`)
+  }
+
+  const labelBaseline = centered ? y + height / 2 : y + 40
+  // El rombo se estrecha hacia arriba y abajo: su texto necesita más margen.
+  const narrow = shape === 'decision'
+  const maxChars = centered ? Math.floor(width / (narrow ? 9 : 6.4)) : Math.floor((width - 28) / 6.4)
+  const labelSize = narrow ? 11 : 12
+  parts.push(`<text x="${textX}" y="${labelBaseline}" text-anchor="${anchor}" font-family="${palette.mono}" font-size="${labelSize}" fill="${palette.text}">${escapeXml(shorten(label, maxChars))}</text>`)
+
+  if (detail) {
+    parts.push(`<text x="${textX}" y="${labelBaseline + 16}" text-anchor="${anchor}" font-family="${palette.font}" font-size="9.5" fill="${palette.muted}">${escapeXml(shorten(detail, Math.floor(maxChars * 0.85)))}</text>`)
+  }
+
+  if (expression && !centered) {
+    parts.push(`<text x="${textX}" y="${labelBaseline + 30}" text-anchor="start" font-family="${palette.mono}" font-size="9" fill="${palette.muted}">${escapeXml(shorten(expression, Math.floor(maxChars * 0.85)))}</text>`)
+  }
+
   return parts.join('')
+}
+
+/** Punto donde se coloca la etiqueta de una flecha: el tramo más largo. */
+function edgeLabelAnchor(points: Array<{ x: number; y: number }>) {
+  const segment = points.slice(1).reduce((longest, point, index) => {
+    const previous = points[index]
+    const length = Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y)
+    return length > longest.length ? { start: previous, end: point, length } : longest
+  }, { start: points[0], end: points[0], length: 0 })
+  return { x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2 }
 }
 
 function drawEdge(edge: FlowCardEdge, palette: DiagramPalette): string {
@@ -166,8 +216,9 @@ function drawEdge(edge: FlowCardEdge, palette: DiagramPalette): string {
   if (points.length < 2) return ''
   const role = edge.data?.role ?? 'control'
   const color = palette.edge[role] ?? palette.muted
+  const dash = role === 'repeat' ? '5 4' : role === 'unreachable' ? '2 4' : ''
   const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${Math.round(point.x)} ${Math.round(point.y)}`).join(' ')
-  const parts: string[] = [`<path d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />`]
+  const parts: string[] = [`<path d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''} />`]
 
   const last = points[points.length - 1]
   const previous = points[points.length - 2]
@@ -176,7 +227,7 @@ function drawEdge(edge: FlowCardEdge, palette: DiagramPalette): string {
 
   const edgeLabel = typeof edge.label === 'string' ? edge.label : ''
   if (edgeLabel) {
-    const middle = points[Math.floor(points.length / 2)]
+    const middle = edgeLabelAnchor(points)
     const width = edgeLabel.length * 6 + 12
     parts.push(`<rect x="${middle.x - width / 2}" y="${middle.y - 11}" width="${width}" height="18" rx="5" fill="${palette.surfaceAlt}" stroke="${palette.border}" stroke-width="0.8" />`)
     parts.push(`<text x="${middle.x}" y="${middle.y + 2}" text-anchor="middle" font-family="${palette.mono}" font-size="10" fill="${palette.muted}">${escapeXml(edgeLabel)}</text>`)
@@ -216,22 +267,32 @@ export function buildDiagramSvg(nodes: FlowCardNode[], edges: FlowCardEdge[], op
 
 /** Convierte el SVG del diagrama en un PNG a la escala indicada. */
 export async function svgToPng(svg: string, scale = 2): Promise<Blob> {
-  const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  // El SVG viaja como Blob y no como URL de datos: los diagramas grandes
+  // superan el límite de longitud de una URL de datos en varios navegadores.
+  const objectUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))
   const image = new Image()
-  image.decoding = 'sync'
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error('No se pudo rasterizar el diagrama.'))
-    image.src = encoded
-  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('No se pudo rasterizar el diagrama.'))
+      image.src = objectUrl
+    })
+  } catch (cause) {
+    URL.revokeObjectURL(objectUrl)
+    throw cause
+  }
   const width = image.naturalWidth || 1200
   const height = image.naturalHeight || 800
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(width * scale)
   canvas.height = Math.round(height * scale)
   const context = canvas.getContext('2d')
-  if (!context) throw new Error('El navegador no permite rasterizar el diagrama.')
+  if (!context) {
+    URL.revokeObjectURL(objectUrl)
+    throw new Error('El navegador no permite rasterizar el diagrama.')
+  }
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  URL.revokeObjectURL(objectUrl)
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('No se pudo generar el PNG.'))), 'image/png')
   })
