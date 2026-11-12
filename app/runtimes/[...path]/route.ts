@@ -46,6 +46,9 @@ function contentType(relative: string): string {
   return MIME_TYPES[extension] ?? 'application/octet-stream'
 }
 
+/** Mensaje para cuando el motor no está en el despliegue. */
+const NOT_FOUND = 'Este motor no está incluido en el despliegue.'
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ path?: string[] }> },
@@ -54,19 +57,19 @@ export async function GET(
   const segments = (path ?? []).filter((segment) => segment && segment !== '.' && segment !== '..')
   const relative = segments.join('/')
   if (!relative || !ALLOWED_ROOTS.some((root) => relative.startsWith(root))) {
-    return new Response('No encontrado', { status: 404 })
+    return new Response(NOT_FOUND, { status: 404 })
   }
 
   // La carpeta de módulos es la única fuente: nada fuera de ella se sirve.
   const modulesRoot = join(process.cwd(), 'node_modules')
   const target = normalize(join(modulesRoot, relative))
   if (target !== modulesRoot && !target.startsWith(modulesRoot + sep)) {
-    return new Response('No encontrado', { status: 404 })
+    return new Response(NOT_FOUND, { status: 404 })
   }
 
   try {
     const info = await stat(target)
-    if (!info.isFile()) return new Response('No encontrado', { status: 404 })
+    if (!info.isFile()) return new Response(NOT_FOUND, { status: 404 })
     const stream = Readable.toWeb(createReadStream(target)) as ReadableStream<Uint8Array>
     return new Response(stream, {
       headers: {
@@ -76,6 +79,6 @@ export async function GET(
       },
     })
   } catch {
-    return new Response('No encontrado', { status: 404 })
+    return new Response(NOT_FOUND, { status: 404 })
   }
 }
