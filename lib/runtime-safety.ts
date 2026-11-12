@@ -16,5 +16,8 @@ export const MAX_RUNTIME_BOOT_TIME_MS = 30_000
 /** Tope de tiempo para los runtimes que compilan antes de ejecutar (C, C++, Java, Go). */
 export const MAX_COMPILER_TIME_MS = 60_000
 
+/** Tope de tiempo para los runtimes que descargan una cadena de herramientas enorme (Rust). */
+export const MAX_TOOLCHAIN_TIME_MS = 240_000
+
 export const EXECUTION_LIMIT_NOTICE =
   'El programa corre en una pestaña del navegador: 8 s de ejecución, 16 KB de salida y sin acceso a la red.'

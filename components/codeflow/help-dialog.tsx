@@ -117,7 +117,7 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
               <div className="cf-help__section-title"><ShieldAlert aria-hidden="true" /> Ejecución aislada</div>
               <p>
                 <CircleAlert aria-hidden="true" />
-                <span>Cada ejecución corre en un Web Worker: sin DOM, sin red y sin secretos del proyecto. Python, Lua, Go, C, C++ y Java usan motores compilados a WebAssembly que se descargan la primera vez —la consola muestra el avance— y quedan en la caché; al terminar, el worker se destruye.</span>
+                <span>Cada ejecución corre en un Web Worker: sin DOM, sin red y sin secretos del proyecto. Python, Lua, Go, C, C++, Java, C# y Rust usan motores compilados a WebAssembly que se descargan la primera vez —la consola muestra el avance— y quedan en la caché; al terminar, el worker se destruye.</span>
               </p>
             </section>
 

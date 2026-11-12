@@ -12,12 +12,14 @@ El editor nunca evalúa el código en la página. Cada ejecución crea un **Web 
 | Go | Yaegi | Intérprete de Go compilado a WebAssembly: interpreta el fuente con la biblioteca estándar. |
 | C y C++ | Clang 22 | El compilador de Clang compilado a WebAssembly: el fuente se compila a un módulo WASI (`wasm32-wasi`) y se ejecuta en el mismo worker. |
 | Java | javac + TeaVM | `javac` y el compilador AOT de TeaVM dentro de un único módulo de WebAssembly: el fuente se compila a clases y se ejecuta en JavaScript. |
+| C# | .NET (Blazor WASM) | El runtime de .NET y el compilador de Roslyn dentro de la página: el fuente se compila y se ejecuta sin servidor. |
+| Rust | rustc + cargo (Rubrc) | El propio compilador de Rust compilado a WebAssembly: `cargo` compila el fuente para `wasm32-wasip1` y lo ejecuta en la misma pestaña. |
 
 Los archivos que forman parte de los motores se sirven desde `node_modules` por la ruta `/runtimes/[...path]`, que solo entrega bytes: no ejecuta nada y no recibe el código del usuario.
 
 Los motores se descargan la primera vez que se usan y quedan en la caché del navegador. Mientras se descargan, la consola muestra una barra con el nombre del archivo y los kilobytes que lleva; a partir de la segunda ejecución el motor arranca al instante.
 
-C# y Rust se analizan y se dibujan, pero no tienen un motor que quepa en el navegador: su consola avisa de que no se pueden ejecutar aquí.
+Rust es el caso más pesado: su cadena de herramientas son 56 MB y la biblioteca estándar del compilador son 19 MB más. El motor se queda en memoria entre ejecuciones, así que solo se paga una vez.
 
 ## Qué se puede hacer
 
@@ -38,10 +40,12 @@ print(f"Hola, {nombre}")
 Todo está acotado para que una pestaña no se quede bloqueada:
 
 - fuente hasta 50 KB;
-- 8 segundos de ejecución (30 en los motores que arrancan una máquina virtual y 60 en los que compilan antes de ejecutar);
+- 8 segundos de ejecución (30 en los motores que arrancan una máquina virtual, 60 en los que compilan antes de ejecutar y 240 en Rust, que descarga su propia cadena de herramientas);
 - 16 KB de salida.
 
 No hay peticiones al servidor ni cupo compartido: cada ejecución es local y se puede repetir tantas veces como haga falta.
+
+C# es la excepción: Blazor busca un punto de anclaje en la página y compila en el hilo principal, así que la interfaz se queda quieta los segundos que tarda Roslyn. El resto de motores trabaja en su worker y la interfaz no se bloquea.
 
 ## Lo que no se hace
 

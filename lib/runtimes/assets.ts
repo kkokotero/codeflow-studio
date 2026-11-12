@@ -15,6 +15,8 @@ export interface RuntimeAsset {
   path: string
   /** Nombre que se muestra en la barra de carga. */
   label: string
+  /** URL completa, para lo que no vive en el servidor. */
+  external?: string
 }
 
 /** Carpeta del servidor donde se sirven los archivos de los runtimes. */
@@ -33,6 +35,22 @@ const JAVA_ASSETS: RuntimeAsset[] = [
   { path: '@live-codes/java-wasm/dist/teavm/runtime-classlib-teavm.bin', label: 'tiempo de ejecución' },
 ]
 
+/**
+ * La cadena de herramientas de Rust son tres trozos de la imagen del
+ * compilador: los nombres llevan la huella de la versión instalada.
+ */
+const RUST_ASSETS: RuntimeAsset[] = [
+  { path: '@kreijstal/rubrc/vfs.core-G3YEEGQv.wasm.br.part-000', label: 'rustc' },
+  { path: '@kreijstal/rubrc/vfs.core-G3YEEGQv.wasm.br.part-001', label: 'rustc' },
+  { path: '@kreijstal/rubrc/vfs.core-G3YEEGQv.wasm.br.part-002', label: 'rustc' },
+  { path: '@kreijstal/rubrc/brotli_dec_wasm_bg-Dn-Szc7i.wasm', label: 'descompresor' },
+  {
+    path: '',
+    label: 'biblioteca estándar de Rust',
+    external: 'https://oligamiq.github.io/rust_wasm/v0.2.0/wasm32-wasip1.tar.br',
+  },
+]
+
 export const RUNTIME_ASSETS: Partial<Record<Language, RuntimeAsset[]>> = {
   javascript: [],
   typescript: [],
@@ -45,6 +63,7 @@ export const RUNTIME_ASSETS: Partial<Record<Language, RuntimeAsset[]>> = {
   c: CLANG_ASSETS,
   cpp: CLANG_ASSETS,
   java: JAVA_ASSETS,
+  rust: RUST_ASSETS,
 }
 
 /**
@@ -58,7 +77,7 @@ export function runtimeAssetUrls(
   language: Language,
 ): { url: string; label: string }[] {
   return (RUNTIME_ASSETS[language] ?? []).map((asset) => ({
-    url: `${origin}${RUNTIME_BASE}/${asset.path}`,
+    url: asset.external ?? `${origin}${RUNTIME_BASE}/${asset.path}`,
     label: asset.label,
   }))
 }
@@ -93,9 +112,34 @@ const fetchWithProgress = async (url, label) => {
   return buffer
 }
 
-const warmAssets = async (assets) => {
+/**
+ * Descarga un archivo avisando del progreso y lo suelta: sirve para calentar
+ * la caché del navegador antes de que otro motor lo pida.
+ */
+const warmFile = async (url, label) => {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('No se pudo cargar ' + label)
+  const total = Number(response.headers.get('content-length') || 0)
+  const reader = response.body.getReader()
+  let loaded = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    loaded += value.byteLength
+    send({ type: 'progress', label, loaded, total })
+  }
+  return true
+}
+
+const warmFiles = async (assets) => {
   for (const asset of assets) {
-    await fetchWithProgress(asset.url, asset.label)
+    try {
+      await warmFile(asset.url, asset.label)
+    } catch (error) {
+      // Si un archivo no está, el motor lo volverá a pedir por su cuenta.
+    }
   }
 }
+
+const warmAssets = warmFiles
 `

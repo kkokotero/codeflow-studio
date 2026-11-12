@@ -1,12 +1,15 @@
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { join, normalize, sep } from 'node:path'
+import { Readable } from 'node:stream'
 
 export const runtime = 'nodejs'
 
 /**
  * Sirve los archivos de los runtimes del navegador.
  *
- * Los runtimes (Pyodide para Python, el módulo de Lua) viven en
+ * Los runtimes (Pyodide para Python, el módulo de Lua, Clang para C y C++,
+ * el compilador de Java, Blazor para C# y la cadena de Rust) viven en
  * `node_modules`; esta ruta los entrega tal cual para que el navegador pueda
  * cargarlos. No ejecuta nada: el código del usuario nunca pasa por el
  * servidor.
@@ -19,8 +22,9 @@ const ALLOWED_ROOTS = [
   '@live-codes/clang-wasm/dist/',
   '@live-codes/clang-wasm/assets/',
   '@live-codes/java-wasm/dist/',
+  '@live-codes/blazor-wasm/',
+  '@kreijstal/rubrc/',
 ]
-const ALLOWED_EXTENSIONS = ['.js', '.mjs', '.wasm', '.zip', '.json', '.gz', '.bin']
 
 const MIME_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -29,7 +33,17 @@ const MIME_TYPES: Record<string, string> = {
   '.zip': 'application/zip',
   '.json': 'application/json; charset=utf-8',
   '.gz': 'application/gzip',
+  '.br': 'application/octet-stream',
   '.bin': 'application/octet-stream',
+  '.dat': 'application/octet-stream',
+  '.part-000': 'application/octet-stream',
+  '.part-001': 'application/octet-stream',
+  '.part-002': 'application/octet-stream',
+}
+
+function contentType(relative: string): string {
+  const extension = relative.slice(relative.lastIndexOf('.')).toLowerCase()
+  return MIME_TYPES[extension] ?? 'application/octet-stream'
 }
 
 export async function GET(
@@ -42,16 +56,22 @@ export async function GET(
   if (!relative || !ALLOWED_ROOTS.some((root) => relative.startsWith(root))) {
     return new Response('No encontrado', { status: 404 })
   }
-  const extension = relative.slice(relative.lastIndexOf('.'))
-  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+
+  // La carpeta de módulos es la única fuente: nada fuera de ella se sirve.
+  const modulesRoot = join(process.cwd(), 'node_modules')
+  const target = normalize(join(modulesRoot, relative))
+  if (target !== modulesRoot && !target.startsWith(modulesRoot + sep)) {
     return new Response('No encontrado', { status: 404 })
   }
 
   try {
-    const data = await readFile(join(process.cwd(), 'node_modules', relative))
-    return new Response(new Uint8Array(data), {
+    const info = await stat(target)
+    if (!info.isFile()) return new Response('No encontrado', { status: 404 })
+    const stream = Readable.toWeb(createReadStream(target)) as ReadableStream<Uint8Array>
+    return new Response(stream, {
       headers: {
-        'Content-Type': MIME_TYPES[extension] ?? 'application/octet-stream',
+        'Content-Type': contentType(relative),
+        'Content-Length': String(info.size),
         'Cache-Control': 'public, max-age=31536000, immutable',
       },
     })

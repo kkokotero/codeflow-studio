@@ -1,10 +1,12 @@
 import type { Language } from '@/lib/languages'
 import { cRuntime, cppRuntime } from '@/lib/runtimes/clang'
+import { csharpRuntime } from '@/lib/runtimes/csharp'
 import { goRuntime } from '@/lib/runtimes/go'
 import { javaRuntime } from '@/lib/runtimes/java'
 import { javascriptRuntime } from '@/lib/runtimes/javascript'
 import { luaRuntime } from '@/lib/runtimes/lua'
 import { pythonRuntime } from '@/lib/runtimes/python'
+import { rustRuntime } from '@/lib/runtimes/rust'
 import type { BrowserRuntime } from '@/lib/runtimes/types'
 
 /**
@@ -23,6 +25,8 @@ export const BROWSER_RUNTIMES: Partial<Record<Language, BrowserRuntime>> = {
   c: cRuntime,
   cpp: cppRuntime,
   java: javaRuntime,
+  csharp: csharpRuntime,
+  rust: rustRuntime,
 }
 
 /** Devuelve el runtime del lenguaje, si existe en el navegador. */
