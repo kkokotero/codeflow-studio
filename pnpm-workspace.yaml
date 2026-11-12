@@ -4,12 +4,11 @@ minimumReleaseAgeExclude:
   - '@next/*'
   - next
 
-# Los scripts de instalación de estas dependencias se ejecutan siempre:
-# el binario de esbuild lo necesita la cadena de herramientas de las pruebas.
-onlyBuiltDependencies:
-  - esbuild
-
-# El vigilante de archivos solo se usa mientras se developa, así que no hace
-# falta compilarlo en el despliegue.
-ignoredBuiltDependencies:
-  - '@parcel/watcher'
+# Los scripts de instalación de las dependencias se revisan uno a uno: sin esta
+# lista, pnpm aborta la instalación con ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  # esbuild lo necesita la cadena de herramientas de las pruebas.
+  esbuild: true
+  # El vigilante de archivos solo se usa mientras se developa: no hace falta
+  # compilarlo en el despliegue.
+  '@parcel/watcher': false
