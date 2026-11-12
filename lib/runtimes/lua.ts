@@ -1,5 +1,6 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
-import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
+import { PROGRESS_HELPER, runtimeAssetUrls } from '@/lib/runtimes/assets'
+import { MAX_RUNTIME_BOOT_TIME_MS } from '@/lib/runtime-safety'
 
 /**
  * Runtime de Lua en el navegador.
@@ -31,7 +32,7 @@ self.onmessage = async (event) => {
   if (data.type !== 'run') return
 
   try {
-    await warmAssets([{ url: '${origin}${LUA_WASM_PATH}', label: 'Lua' }])
+    await warmAssets(${JSON.stringify(runtimeAssetUrls(origin, 'lua'))})
     importScripts('${origin}${WASMOON_PATH}')
     const factory = new self.wasmoon.LuaFactory('${origin}${LUA_WASM_PATH}')
     const engine = await factory.createEngine()
@@ -54,7 +55,7 @@ export const luaRuntime: BrowserRuntime = {
   place: 'Wasmoon · WebAssembly',
   run: (options: RuntimeOptions): RuntimeSession => {
     const origin = typeof location === 'undefined' ? '' : location.origin
-    const timeoutMs = options.timeoutMs ?? 12_000
+    const timeoutMs = options.timeoutMs ?? MAX_RUNTIME_BOOT_TIME_MS
     const maxOutputBytes = options.maxOutputBytes ?? 16_384
     const startedAt = Date.now()
     const output: { stream: 'stdout' | 'stderr'; text: string }[] = []

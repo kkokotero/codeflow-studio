@@ -5,7 +5,7 @@ import { CircleAlert, Keyboard, Layers3, ShieldAlert, type LucideIcon } from 'lu
 import { APP_ICONS } from '@/components/codeflow/app-icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
+import { MAX_COMPILER_TIME_MS, MAX_EXECUTION_OUTPUT_BYTES, MAX_EXECUTION_TIME_MS } from '@/lib/runtime-safety'
 import { LANGUAGE_DEFINITIONS, SUPPORTED_LANGUAGES } from '@/lib/languages'
 
 interface HelpDialogProps {
@@ -117,12 +117,12 @@ export function HelpDialog({ open, onClose }: HelpDialogProps) {
               <div className="cf-help__section-title"><ShieldAlert aria-hidden="true" /> Ejecución aislada</div>
               <p>
                 <CircleAlert aria-hidden="true" />
-                <span>Cada ejecución corre en un Web Worker: sin DOM, sin red y sin secretos del proyecto. Python y Lua usan motores compilados a WebAssembly que se cargan en el navegador; al terminar, el worker se destruye.</span>
+                <span>Cada ejecución corre en un Web Worker: sin DOM, sin red y sin secretos del proyecto. Python, Lua, Go, C, C++ y Java usan motores compilados a WebAssembly que se descargan la primera vez —la consola muestra el avance— y quedan en la caché; al terminar, el worker se destruye.</span>
               </p>
             </section>
 
             <p className="cf-help__limit">
-              <strong>Límites:</strong> fuente hasta 50 KB, máximo {MAX_EXECUTION_TIME_MS / 1_000} segundos de ejecución y {Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB de salida. La consola muestra stdout y stderr en vivo y acepta datos por la entrada estándar. El análisis es estático: no captura variables ni trazas paso a paso, y puede rechazar sintaxis no compatible en lugar de dibujar un flujo incompleto.
+              <strong>Límites:</strong> fuente hasta 50 KB, hasta {MAX_EXECUTION_TIME_MS / 1_000} segundos de ejecución ({MAX_COMPILER_TIME_MS / 1_000} en los lenguajes que compilan antes de ejecutar) y {Math.round(MAX_EXECUTION_OUTPUT_BYTES / 1_024)} KB de salida. La consola muestra stdout y stderr en vivo y acepta datos por la entrada estándar. El análisis es estático: no captura variables ni trazas paso a paso, y puede rechazar sintaxis no compatible en lugar de dibujar un flujo incompleto.
             </p>
           </aside>
         </div>

@@ -1,5 +1,6 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
-import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
+import { PROGRESS_HELPER, runtimeAssetUrls } from '@/lib/runtimes/assets'
+import { MAX_COMPILER_TIME_MS } from '@/lib/runtime-safety'
 
 /**
  * Runtime de Java en el navegador.
@@ -27,12 +28,7 @@ let runtime = null
 const loadRuntime = async () => {
   if (runtime) return runtime
   importScripts('${origin}${JAVA_IIFE}')
-  const assets = [
-    { url: '${origin}${JAVA_TEAVM}compiler.wasm', label: 'javac' },
-    { url: '${origin}${JAVA_TEAVM}compile-classlib-teavm.bin', label: 'biblioteca de clases' },
-    { url: '${origin}${JAVA_TEAVM}runtime-classlib-teavm.bin', label: 'tiempo de ejecución' },
-  ]
-  await warmAssets(assets)
+  await warmAssets(${JSON.stringify(runtimeAssetUrls(origin, 'java'))})
   runtime = await self.JavaWasm.createRuntime({
     baseUrl: '${origin}${JAVA_DIST}',
     teavmBaseUrl: '${origin}${JAVA_TEAVM}',
@@ -65,7 +61,7 @@ export const javaRuntime: BrowserRuntime = {
   place: 'javac · WebAssembly',
   run: (options: RuntimeOptions): RuntimeSession => {
     const origin = typeof location === 'undefined' ? '' : location.origin
-    const timeoutMs = options.timeoutMs ?? 60_000
+    const timeoutMs = options.timeoutMs ?? MAX_COMPILER_TIME_MS
     const maxOutputBytes = options.maxOutputBytes ?? 16_384
     const startedAt = Date.now()
     const output: { stream: 'stdout' | 'stderr'; text: string }[] = []

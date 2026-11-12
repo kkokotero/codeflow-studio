@@ -11,7 +11,10 @@ export const MAX_EXECUTION_OUTPUT_BYTES = 16_384
 export const MAX_EXECUTION_TIME_MS = 8_000
 
 /** Tope de tiempo para los runtimes que arrancan una máquina (Python, Lua). */
-export const MAX_RUNTIME_BOOT_TIME_MS = 20_000
+export const MAX_RUNTIME_BOOT_TIME_MS = 30_000
+
+/** Tope de tiempo para los runtimes que compilan antes de ejecutar (C, C++, Java, Go). */
+export const MAX_COMPILER_TIME_MS = 60_000
 
 export const EXECUTION_LIMIT_NOTICE =
   'El programa corre en una pestaña del navegador: 8 s de ejecución, 16 KB de salida y sin acceso a la red.'

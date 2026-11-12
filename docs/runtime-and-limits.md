@@ -4,13 +4,20 @@
 
 El editor nunca evalúa el código en la página. Cada ejecución crea un **Web Worker** dentro del navegador y corre ahí el programa del archivo:
 
-- **JavaScript y TypeScript** se ejecutan tal cual en el worker. TypeScript se traduce antes quitando sus anotaciones con el mismo analizador de Babel que usa el diagrama.
-- **Python** usa Pyodide, que es CPython compilado a WebAssembly. El motor se carga la primera vez desde la ruta `/runtimes/pyodide` y queda en la caché del navegador.
-- **Lua** usa Wasmoon, que trae Lua 5.4 compilado a WebAssembly.
+| Lenguaje | Motor | Qué hace |
+| --- | --- | --- |
+| JavaScript y TypeScript | Web Worker nativo | El programa se ejecuta tal cual; TypeScript se traduce antes quitando sus anotaciones con el mismo analizador de Babel que usa el diagrama. |
+| Python | Pyodide | CPython compilado a WebAssembly, con su biblioteca estándar. |
+| Lua | Wasmoon | Lua 5.4 compilado a WebAssembly. |
+| Go | Yaegi | Intérprete de Go compilado a WebAssembly: interpreta el fuente con la biblioteca estándar. |
+| C y C++ | Clang 22 | El compilador de Clang compilado a WebAssembly: el fuente se compila a un módulo WASI (`wasm32-wasi`) y se ejecuta en el mismo worker. |
+| Java | javac + TeaVM | `javac` y el compilador AOT de TeaVM dentro de un único módulo de WebAssembly: el fuente se compila a clases y se ejecuta en JavaScript. |
 
 Los archivos que forman parte de los motores se sirven desde `node_modules` por la ruta `/runtimes/[...path]`, que solo entrega bytes: no ejecuta nada y no recibe el código del usuario.
 
-El resto de lenguajes (Go, C, C++, Java, C#, Rust) se analizan y se dibujan, pero no tienen un motor que quepa en el navegador: su consola avisa de que no se pueden ejecutar aquí.
+Los motores se descargan la primera vez que se usan y quedan en la caché del navegador. Mientras se descargan, la consola muestra una barra con el nombre del archivo y los kilobytes que lleva; a partir de la segunda ejecución el motor arranca al instante.
+
+C# y Rust se analizan y se dibujan, pero no tienen un motor que quepa en el navegador: su consola avisa de que no se pueden ejecutar aquí.
 
 ## Qué se puede hacer
 
@@ -31,7 +38,7 @@ print(f"Hola, {nombre}")
 Todo está acotado para que una pestaña no se quede bloqueada:
 
 - fuente hasta 50 KB;
-- 8 segundos de ejecución (20 en los motores que arrancan una máquina virtual);
+- 8 segundos de ejecución (30 en los motores que arrancan una máquina virtual y 60 en los que compilan antes de ejecutar);
 - 16 KB de salida.
 
 No hay peticiones al servidor ni cupo compartido: cada ejecución es local y se puede repetir tantas veces como haga falta.
@@ -43,3 +50,5 @@ No se instrumenta el código para capturar variables, pila de llamadas ni trazas
 ## Añadir un lenguaje
 
 Un runtime es un archivo en `lib/runtimes/` que cumple el contrato de `lib/runtimes/types.ts`: recibe el código, avisa de la salida, acepta datos por la entrada estándar y termina avisando del resultado. Al registrarlo en `lib/runtimes/index.ts`, el lenguaje aparece en el selector de ejecución de la consola.
+
+Los archivos que el motor descarga se declaran en `lib/runtimes/assets.ts`: esa lista es la que alimenta la barra de progreso de la consola.

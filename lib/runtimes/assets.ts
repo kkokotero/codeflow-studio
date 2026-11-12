@@ -5,6 +5,9 @@ import type { Language } from '@/lib/languages'
  *
  * Se descargan con seguimiento de progreso y quedan en la caché del
  * navegador: la segunda ejecución arranca al instante.
+ *
+ * Este archivo es la lista única: añadir un runtime es añadir su entrada y
+ * nada más.
  */
 
 export interface RuntimeAsset {
@@ -13,6 +16,9 @@ export interface RuntimeAsset {
   /** Nombre que se muestra en la barra de carga. */
   label: string
 }
+
+/** Carpeta del servidor donde se sirven los archivos de los runtimes. */
+export const RUNTIME_BASE = '/runtimes'
 
 const CLANG_ASSETS: RuntimeAsset[] = [
   { path: '@live-codes/clang-wasm/assets/bin/clang.wasm.gz', label: 'clang' },
@@ -39,6 +45,22 @@ export const RUNTIME_ASSETS: Partial<Record<Language, RuntimeAsset[]>> = {
   c: CLANG_ASSETS,
   cpp: CLANG_ASSETS,
   java: JAVA_ASSETS,
+}
+
+/**
+ * URLs absolutas de los archivos de un runtime.
+ *
+ * El worker se crea con una URL de blob, así que necesita direcciones
+ * completas: el origen del sitio más la carpeta de runtimes.
+ */
+export function runtimeAssetUrls(
+  origin: string,
+  language: Language,
+): { url: string; label: string }[] {
+  return (RUNTIME_ASSETS[language] ?? []).map((asset) => ({
+    url: `${origin}${RUNTIME_BASE}/${asset.path}`,
+    label: asset.label,
+  }))
 }
 
 /**

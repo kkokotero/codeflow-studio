@@ -1,5 +1,6 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
-import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
+import { PROGRESS_HELPER, runtimeAssetUrls } from '@/lib/runtimes/assets'
+import { MAX_COMPILER_TIME_MS } from '@/lib/runtime-safety'
 
 /**
  * Runtime de C y C++ en el navegador.
@@ -23,13 +24,7 @@ let compiler = null
 const loadCompiler = async () => {
   if (compiler) return compiler
   importScripts('${origin}${CLANG_IIFE}')
-  const assets = [
-    { url: '${origin}${CLANG_ASSETS}bin/clang.wasm.gz', label: 'clang' },
-    { url: '${origin}${CLANG_ASSETS}bin/lld.wasm.gz', label: 'enlazador' },
-    { url: '${origin}${CLANG_ASSETS}bin/memfs.wasm.gz', label: 'sistema de archivos' },
-    { url: '${origin}${CLANG_ASSETS}bin/sysroot.tar.gz', label: 'biblioteca estándar' },
-  ]
-  await warmAssets(assets)
+  await warmAssets(${JSON.stringify(runtimeAssetUrls(origin, language))})
   compiler = await self.clangWasm.createCompiler('${language}', { baseUrl: '${origin}${CLANG_ASSETS}' })
   return compiler
 }
@@ -61,7 +56,7 @@ function createClangRuntime(language: 'c' | 'cpp', id: 'c' | 'cpp'): BrowserRunt
     place: 'Clang · WebAssembly',
     run: (options: RuntimeOptions): RuntimeSession => {
       const origin = typeof location === 'undefined' ? '' : location.origin
-      const timeoutMs = options.timeoutMs ?? 60_000
+      const timeoutMs = options.timeoutMs ?? MAX_COMPILER_TIME_MS
       const maxOutputBytes = options.maxOutputBytes ?? 16_384
       const startedAt = Date.now()
       const output: { stream: 'stdout' | 'stderr'; text: string }[] = []

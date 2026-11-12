@@ -1,5 +1,6 @@
 import type { BrowserRuntime, RuntimeOptions, RuntimeSession } from '@/lib/runtimes/types'
-import { PROGRESS_HELPER } from '@/lib/runtimes/assets'
+import { PROGRESS_HELPER, runtimeAssetUrls } from '@/lib/runtimes/assets'
+import { MAX_RUNTIME_BOOT_TIME_MS } from '@/lib/runtime-safety'
 
 /**
  * Runtime de Python en el navegador.
@@ -27,10 +28,7 @@ ${PROGRESS_HELPER}
 
 const loadRuntime = async () => {
   if (pyodide) return pyodide
-  await warmAssets([
-    { url: '${origin}${PYODIDE_INDEX_PATH}pyodide.asm.wasm', label: 'Pyodide' },
-    { url: '${origin}${PYODIDE_INDEX_PATH}python_stdlib.zip', label: 'biblioteca estándar' },
-  ])
+  await warmAssets(${JSON.stringify(runtimeAssetUrls(origin, 'python'))})
   const { loadPyodide } = await import('${origin}${PYODIDE_PATH}')
   pyodide = await loadPyodide({ indexURL: '${origin}${PYODIDE_INDEX_PATH}' })
   return pyodide
@@ -85,7 +83,7 @@ export const pythonRuntime: BrowserRuntime = {
   place: 'Pyodide · WebAssembly',
   run: (options: RuntimeOptions): RuntimeSession => {
     const origin = typeof location === 'undefined' ? '' : location.origin
-    const timeoutMs = options.timeoutMs ?? 30_000
+    const timeoutMs = options.timeoutMs ?? MAX_RUNTIME_BOOT_TIME_MS
     const maxOutputBytes = options.maxOutputBytes ?? 16_384
     const startedAt = Date.now()
     const output: { stream: 'stdout' | 'stderr'; text: string }[] = []
